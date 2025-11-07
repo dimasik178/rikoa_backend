@@ -1,23 +1,25 @@
 from flask import Flask, request, jsonify, send_file
-from models import db, Account, Product, Purchase
 from database import db_manager
 import os
+import datetime
 import uuid
 from PIL import Image
-from urllib.parse import urlparse
 from functools import wraps
+import threading
+import time
 
 def create_app():
     app = Flask(__name__)
     app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///art_market.db'
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-    app.config['SECRET_KEY'] = 'your-secret-key-here'
+    app.config['SECRET_KEY'] = 'your-secret-key-here' #TODO
     
     # Настройки для загрузки изображений
     app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
     app.config['UPLOAD_FOLDER'] = 'uploads'
     app.config['ALLOWED_EXTENSIONS'] = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
-    app.config['THUMBNAIL_SIZE'] = (400, 400)  # Размер превью
+    app.config['MAX_PROCESSING_TIME'] = 30  # 🔥 Максимальное время обработки в секундах
+    app.config['MAX_IMAGE_DIMENSION'] = 10000  # 🔥 Максимальный размер изображения по любой стороне
     
     # Создаем папку для загрузок
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -31,9 +33,32 @@ def create_app():
         return '.' in filename and \
                filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
     
+
+    def process_uploaded_image_with_timeout(file, timeout=30):
+        """Обрабатывает загруженное изображение с таймаутом"""
+        result = [None]
+        error = [None]
+        
+        def process():
+            try:
+                result[0], error[0] = process_uploaded_image(file)
+            except Exception as e:
+                error[0] = f"Processing error: {str(e)}"
+        
+        thread = threading.Thread(target=process)
+        thread.start()
+        thread.join(timeout)
+        
+        if thread.is_alive():
+            return None, "Image processing timeout - file too large or complex"
+        
+        return result[0], error[0]
+
     def process_uploaded_image(file):
-        """Обрабатывает загруженное изображение из form-data"""
+        """Обрабатывает загруженное изображение из form-data с динамическим разрешением"""
         try:
+            start_time = time.time()
+            
             # Проверяем размер файла
             file.seek(0, os.SEEK_END)
             file_size = file.tell()
@@ -45,6 +70,13 @@ def create_app():
             # Загружаем изображение
             image = Image.open(file)
             
+            # Проверяем размеры изображения
+            width, height = image.size
+            max_dimension = app.config['MAX_IMAGE_DIMENSION']
+            
+            if width > max_dimension or height > max_dimension:
+                return None, f"Image dimensions too large (max {max_dimension}x{max_dimension})"
+            
             # Проверяем формат
             if image.format not in ['JPEG', 'PNG', 'GIF', 'WEBP']:
                 return None, "Unsupported image format"
@@ -55,26 +87,51 @@ def create_app():
             # Сохраняем оригинал с правильным расширением
             original_extension = image.format.lower()
             original_filename = f"{file_id}_original.{original_extension}"
-            thumbnail_filename = f"{file_id}_thumbnail.jpg"
+            
+            # 🔥 ДИНАМИЧЕСКОЕ РАЗРЕШЕНИЕ ДЛЯ ПРЕВЬЮ
+            # Определяем оптимальный размер превью на основе оригинала
+            if width > 2000 or height > 2000:
+                thumbnail_size = (800, 800)
+            elif width > 1000 or height > 1000:
+                thumbnail_size = (1200, 1200)
+            else:
+                thumbnail_size = (min(width, 1600), min(height, 1600))
+            
+            # Сохраняем оригинальное расширение для превью
+            thumbnail_filename = f"{file_id}_thumbnail.{original_extension}"
 
             # Сохраняем оригинал
             original_path = os.path.join(app.config['UPLOAD_FOLDER'], original_filename)
-            image.save(original_path, optimize=True, quality=85)
+            
+            # Оптимизируем сохранение оригинала
+            if image.format == 'PNG':
+                image.save(original_path, optimize=True)
+            else:
+                image.save(original_path, optimize=True, quality=85)
 
-            # Создаем и сохраняем превью
-            image.thumbnail(app.config['THUMBNAIL_SIZE'], Image.Resampling.LANCZOS)
+            # 🔥 СОЗДАЕМ ПРЕВЬЮ С ДИНАМИЧЕСКИМ РАЗМЕРОМ
+            thumbnail_image = image.copy()
+            thumbnail_image.thumbnail(thumbnail_size, Image.Resampling.LANCZOS)
+            
             thumbnail_path = os.path.join(app.config['UPLOAD_FOLDER'], 'thumbnails', thumbnail_filename)
             
-            # Конвертируем в RGB если нужно (для JPEG)
-            if image.mode in ('RGBA', 'LA', 'P'):
-                background = Image.new('RGB', image.size, (255, 255, 255))
-                background.paste(image, mask=image.split()[-1] if image.mode == 'RGBA' else None)
-                image = background
-            
-            image.save(thumbnail_path, 'JPEG', optimize=True, quality=80)
+            # Сохраняем превью с тем же форматом что и оригинал
+            if thumbnail_image.format == 'PNG':
+                thumbnail_image.save(thumbnail_path, optimize=True)
+            else:
+                if thumbnail_image.mode in ('RGBA', 'LA', 'P'):
+                    background = Image.new('RGB', thumbnail_image.size, (255, 255, 255))
+                    background.paste(thumbnail_image, mask=thumbnail_image.split()[-1] if thumbnail_image.mode == 'RGBA' else None)
+                    thumbnail_image = background
+                thumbnail_image.save(thumbnail_path, optimize=True, quality=80)
             
             # Очищаем память
             image.close()
+            thumbnail_image.close()
+            
+            processing_time = time.time() - start_time
+            if processing_time > 10:
+                print(f"Long image processing: {processing_time:.2f}s, size: {width}x{height}")
             
             return {
                 'original': original_filename,
@@ -140,7 +197,15 @@ def create_app():
     def internal_error(error):
         return jsonify({'error': 'Internal server error'}), 500
 
-    # 🔄 ИЗМЕНЕННЫЕ РОУТЫ ПО НОВОМУ ТЗ
+    # Health check route
+    @app.route('/api/health', methods=['GET'])
+    def health_check():
+        return jsonify({
+            'status': 'healthy', 
+            'message': 'RikoaTech ArtMarket API is running',
+            'timestamp': datetime.utcnow().isoformat(),
+            'version': '3.0'
+        })
 
     # Authentication routes - изменены пути
     @app.route('/api/auth/register', methods=['POST'])
@@ -193,7 +258,7 @@ def create_app():
     @app.route('/api/product', methods=['GET'])
     def get_products():
         page = request.args.get('page', 1, type=int)
-        per_page = 6  # 🔄 ФИКСИРОВАННО 6 штук по новому ТЗ
+        per_page = 6  # 🔄 ФИКСИРОВАННО 6 штук
         
         pagination = db_manager.get_products_paginated(page=page, per_page=per_page)
         
@@ -202,7 +267,7 @@ def create_app():
     @app.route('/api/product/<product_id>/buyers', methods=['GET'])
     def get_product_buyers(product_id):
         buyers = db_manager.get_product_buyers(product_id)
-        # 🔄 Ограничиваем 6 пользователями по новому ТЗ
+        # 🔄 Ограничиваем 6 пользователями
         limited_buyers = buyers[:6]
         return jsonify([buyer.to_dict() for buyer in limited_buyers])
 
@@ -282,7 +347,7 @@ def create_app():
                 return jsonify({'error': 'Creator not found'}), 404
             
             # Обрабатываем загруженное изображение
-            image_info, error = process_uploaded_image(file)
+            image_info, error = process_uploaded_image_with_timeout(file, timeout=app.config['MAX_PROCESSING_TIME'])
             if error:
                 return jsonify({'error': f'Image processing failed: {error}'}), 400
             
@@ -334,12 +399,13 @@ def create_app():
     def serve_thumbnail_image(file_id):
         """Отдает превью изображения по ID"""
         try:
-            thumbnail_path = os.path.join(app.config['UPLOAD_FOLDER'], 'thumbnails', f"{file_id}_thumbnail.jpg")
+            thumbnail_path = os.path.join(app.config['UPLOAD_FOLDER'], 'thumbnails', f"{file_id}_thumbnail.jpeg")
             if os.path.exists(thumbnail_path):
                 return send_file(thumbnail_path)
             else:
                 return jsonify({'error': 'Thumbnail not found'}), 404
         except Exception as e:
+            print("Ошибка serve_thumbnail_image:", e)
             return jsonify({'error': 'Thumbnail not found'}), 404
 
     return app

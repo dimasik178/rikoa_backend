@@ -1,22 +1,22 @@
-# ArtMarket API Documentation v2.0
+# RikoaTech ArtMarket API Documentation v4.0
 
 ## Базовый URL
 ```
 http://localhost:5000/api
 ```
 
-## 🆕 Основные изменения v2.0
+## 🆕 Основные изменения v4.0
 
 ### ✅ **Новая функциональность:**
-- Загрузка изображений через `multipart/form-data`
-- Поддержка форматов: PNG, JPG, JPEG, GIF, WebP
-- Автоматическое создание превью (400x400px)
-- Оптимизация изображений для экономии трафика
-- Убраны `message` поля при успешных ответах
+- **Динамическое разрешение изображений** - превью автоматически масштабируются на основе размера оригинала
+- **Таймаут обработки** - максимальное время обработки 30 секунд
+- **Расширенные ограничения** - максимальный размер изображения 10000x10000 пикселей
+- **Сохранение формата** - превью сохраняются в том же формате что и оригинал
 
-### 🔄 **Устаревшее:**
-- JSON метод с `photoUrl` больше не поддерживается
-- Все загрузки изображений теперь через form-data
+### 🔄 **Улучшения производительности:**
+- Автоматическое определение оптимального размера превью
+- Защита от слишком больших файлов через таймаут
+- Логирование долгих операций обработки
 
 ---
 
@@ -30,7 +30,8 @@ http://localhost:5000/api
   "mail": "string",
   "createdAt": "datetime",
   "bayed": "Product[]",
-  "posted": "Product[]"
+  "posted": "Product[]",
+  "token": "string"
 }
 ```
 
@@ -39,7 +40,6 @@ http://localhost:5000/api
 {
   "id": "string",
   "photoUrl": "string",
-  "originalPhotoUrl": "string",
   "title": "string",
   "price": "int",
   "description": "string",
@@ -48,36 +48,19 @@ http://localhost:5000/api
 }
 ```
 
-### Product with Buyers (Арт с покупателями)
-```json
-{
-  "id": "string",
-  "photoUrl": "string",
-  "originalPhotoUrl": "string", 
-  "title": "string",
-  "price": "int",
-  "description": "string",
-  "updatedAt": "datetime",
-  "creator": "Account",
-  "buyers_count": "int",
-  "buyers": "Account[]"
-}
-```
-
 ---
 
 ## 🔐 Аутентификация
 
 ### 1. Регистрация пользователя
-[[Регистрация пользователя]]
-**POST** `/register`
+**POST** `/api/auth/register`
 
 **Content-Type:** `application/json`
 
 **Тело запроса:**
 ```json
 {
-  "nickname": "artlover",
+  "login": "artlover",
   "mail": "artlover@example.com",
   "password": "securepassword123"
 }
@@ -91,333 +74,79 @@ http://localhost:5000/api
   "mail": "artlover@example.com",
   "createdAt": "2024-01-15T10:30:00.000000",
   "bayed": [],
-  "posted": []
+  "posted": [],
+  "token": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 }
 ```
-
-**Ошибки:**
-- `400` - Missing required fields
-- `400` - Account with this nickname or mail already exists
 
 ---
 
 ### 2. Вход в систему
-[[Вход пользоватя]]
-**POST** `/login`
+**POST** `/api/auth/login`
 
 **Content-Type:** `application/json`
 
 **Тело запроса:**
 ```json
 {
-  "nickname": "user1",
+  "login": "user1",
   "password": "password"
 }
 ```
 
 **Успешный ответ (200):**
 ```json
-{     
-  "bayed": [],
-  "createdAt": "2025-10-26T18:10:58.550639",
+{
   "id": "4720f657-b4cc-4491-a1d2-a247dcb4a567",
+  "nickname": "user1", 
   "mail": "user1@example.com",
-  "nickname": "user1",
-  "posted": [
-    {
-      "description": "This is my beautiful artwork",
-      "id": "deda462d-1d76-4779-b6c2-fd46be016ba0",
-      "originalPhotoUrl": "http://localhost:5000/api/images/original/b33f6ff4-f983-44fc-9a73-e88c49118d6a",
-      "photoUrl": "http://localhost:5000/api/images/thumbnail/b33f6ff4-f983-44fc-9a73-e88c49118d6a",
-      "price": 500,
-      "title": "My Amazing Art",
-      "updatedAt": "2025-11-05T14:51:32.353459"
-    }
-  ]
+  "createdAt": "2025-10-26T18:10:58.550639",
+  "bayed": [],
+  "posted": [],
+  "token": "4720f657-b4cc-4491-a1d2-a247dcb4a567"
 }
 ```
 
-**Ошибки:**
-- `400` - Missing nickname or password
-- `401` - Invalid credentials
+---
+
+### 3. Получить профиль по токену
+**GET** `/api/auth/profile`
+
+**Заголовки:**
+```
+Authorization: Bearer [token]
+```
 
 ---
 
 ## 🎨 Работа с артами
 
-### 3. Получить список артов с пагинацией
-[[Получить список артов с пагинацией]]
-**GET** `/api/products?page=1`
+### 4. Получить список артов (6 на страницу)
+**GET** `/api/product?page=1`
 
 **Параметры:**
 - `page` - номер страницы (по умолчанию: 1)
-- `per_page` - элементов на странице (по умолчанию: 12)
-
-**Успешный ответ (200):**
-```json
-{
-  "products": [
-    {
-      "id": "p1b2c3d4-e5f6-7890-abcd-ef1234567890",
-      "photoUrl": "http://localhost:5000/api/images/thumbnails/file-uuid_thumbnail.jpg",
-      "originalPhotoUrl": "http://localhost:5000/api/images/file-uuid_original.jpg",
-      "title": "Sunset Mountains",
-      "price": 150,
-      "description": "Beautiful mountain landscape",
-      "updatedAt": "2024-01-15T11:00:00.000000",
-      "creator": {
-        "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-        "nickname": "artlover",
-        "mail": "artlover@example.com",
-        "createdAt": "2024-01-15T10:30:00.000000"
-      }
-    }
-  ],
-  "total": 45,
-  "pages": 4,
-  "current_page": 1
-}
-```
 
 ---
 
-### 4. 🆕 Создать новый арт (form-data)
-
-[[Создать новый арт (form-data)]]
-**POST** `/products`
-
-**Content-Type:** `multipart/form-data`
-
-**Form Data:**
-| Поле               | Тип | Обязательное | Описание                                                               |
-|-----------------|-----|------------------|-------------------------------------------------------|
-| `image`             | file | ✅                     | Изображение арта (PNG, JPG, JPEG, GIF, WebP) |
-| `title`             | text | ✅                    | Название арта                                                      |
-| `price`             | text | ✅                    | Цена в AC (целое число)                                     |
-| `creator_id`   | text | ✅                    | ID пользователя-создателя                                  |
-| `description` | text | ❌                    | Описание арта                                                      |
-
-**Ограничения:**
-- Максимальный размер файла: 15MB
-- Поддерживаемые форматы: PNG, JPG, JPEG, GIF, WebP
-- Автоматически создается превью 400x400px
-
-**Успешный ответ (201):**
-```json
-{
-  "id": "p1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "photoUrl": "http://localhost:5000/api/images/thumbnails/file-uuid_thumbnail.jpg",
-  "originalPhotoUrl": "http://localhost:5000/api/images/file-uuid_original.jpg",
-  "title": "Beautiful Art",
-  "price": 150,
-  "description": "Amazing artwork",
-  "updatedAt": "2024-01-15T10:30:00.000000",
-  "creator": {
-    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-    "nickname": "artlover",
-    "mail": "artlover@example.com",
-    "createdAt": "2024-01-15T10:30:00.000000"
-  }
-}
-```
-
-**Ошибки:**
-- `400` - Missing required fields
-- `400` - No image file provided
-- `400` - Invalid file type
-- `400` - File too large (max 15MB)
-- `404` - Creator not found
+### 5. Получить покупателей арта (максимум 6)
+**GET** `/api/product/{product_id}/buyers`
 
 ---
 
-### 5. Получить информацию о конкретном арте
-**GET** `/products/{product_id}`
+### 6. Купить арт
+**POST** `/api/product/buy`
 
-**Пример:**
+**Заголовки:**
 ```
-GET /products/p1b2c3d4-e5f6-7890-abcd-ef1234567890
+Authorization: Bearer [token]
+Content-Type: application/json
 ```
-
-**Успешный ответ (200):**
-```json
-{
-  "product": {
-    "id": "p1b2c3d4-e5f6-7890-abcd-ef1234567890",
-    "photoUrl": "http://localhost:5000/api/images/thumbnails/file-uuid_thumbnail.jpg",
-    "originalPhotoUrl": "http://localhost:5000/api/images/file-uuid_original.jpg",
-    "title": "Sunset Mountains",
-    "price": 150,
-    "description": "Beautiful mountain landscape",
-    "updatedAt": "2024-01-15T11:00:00.000000",
-    "creator": {
-      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-      "nickname": "artlover",
-      "mail": "artlover@example.com",
-      "createdAt": "2024-01-15T10:30:00.000000"
-    },
-    "buyers_count": 3,
-    "buyers": [
-      {
-        "id": "b1b2c3d4-e5f6-7890-abcd-ef1234567890",
-        "nickname": "buyer1",
-        "mail": "buyer1@example.com",
-        "createdAt": "2024-01-14T09:00:00.000000"
-      }
-    ]
-  }
-}
-```
-
----
-
-### 6. Обновить описание арта
-**PUT** `/products/{product_id}`
-
-**Content-Type:** `application/json`
 
 **Тело запроса:**
 ```json
 {
-  "description": "Updated description with more details"
-}
-```
-
-**Успешный ответ (200):**
-```json
-{
-  "id": "p1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "photoUrl": "http://localhost:5000/api/images/thumbnails/file-uuid_thumbnail.jpg",
-  "originalPhotoUrl": "http://localhost:5000/api/images/file-uuid_original.jpg",
-  "title": "Sunset Mountains",
-  "price": 150,
-  "description": "Updated description with more details",
-  "updatedAt": "2024-01-15T12:30:00.000000",
-  "creator": {
-    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-    "nickname": "artlover",
-    "mail": "artlover@example.com",
-    "createdAt": "2024-01-15T10:30:00.000000"
-  }
-}
-```
-
----
-
-## 💰 Покупки
-
-### 7. Купить арт (подписаться)
-**POST** `/products/{product_id}/purchase`
-
-**Content-Type:** `application/json`
-
-**Тело запроса:**
-```json
-{
-  "account_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-}
-```
-
-**Успешный ответ (201):**
-```json
-{
-  "id": "pur1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "account_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "product_id": "p1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "purchased_at": "2024-01-15T13:00:00.000000"
-}
-```
-
----
-
-### 8. Получить список покупателей арта
-**GET** `/products/{product_id}/buyers`
-
-**Успешный ответ (200):**
-```json
-{
-  "buyers": [
-    {
-      "id": "b1b2c3d4-e5f6-7890-abcd-ef1234567890",
-      "nickname": "artcollector",
-      "mail": "collector@example.com",
-      "createdAt": "2024-01-14T09:00:00.000000"
-    }
-  ]
-}
-```
-
----
-
-## 👤 Профили пользователей
-
-### 9. Получить информацию об аккаунте
-[[Получить информацию об аккаунте]]
-**GET** `/accounts/{account_id}`
-
-**Успешный ответ (200):**
-```json
-{
-  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "nickname": "artlover",
-  "mail": "artlover@example.com",
-  "createdAt": "2024-01-15T10:30:00.000000",
-  "bayed": [
-    {
-      "id": "p2b2c3d4-e5f6-7890-abcd-ef1234567890",
-      "photoUrl": "http://localhost:5000/api/images/thumbnails/file2-uuid_thumbnail.jpg",
-      "originalPhotoUrl": "http://localhost:5000/api/images/file2-uuid_original.jpg",
-      "title": "Ocean Waves",
-      "price": 200,
-      "description": "Calming ocean scene",
-      "updatedAt": "2024-01-14T15:30:00.000000"
-    }
-  ],
-  "posted": [
-    {
-      "id": "p1b2c3d4-e5f6-7890-abcd-ef1234567890",
-      "photoUrl": "http://localhost:5000/api/images/thumbnails/file1-uuid_thumbnail.jpg",
-      "originalPhotoUrl": "http://localhost:5000/api/images/file1-uuid_original.jpg",
-      "title": "Sunset Mountains",
-      "price": 150,
-      "description": "Beautiful mountain landscape",
-      "updatedAt": "2024-01-15T11:00:00.000000"
-    }
-  ]
-}
-```
-
----
-
-## 🔍 Поиск
-
-### 10. Поиск артов
-**GET** `/search?q={query}`
-
-**Пример:**
-```
-GET /search?q=mountains
-```
-
-**Успешный ответ (200):**
-```json
-{
-  "products": [
-    {
-      "id": "p1b2c3d4-e5f6-7890-abcd-ef1234567890",
-      "photoUrl": "http://localhost:5000/api/images/thumbnails/file-uuid_thumbnail.jpg",
-      "originalPhotoUrl": "http://localhost:5000/api/images/file-uuid_original.jpg",
-      "title": "Sunset Mountains",
-      "price": 150,
-      "description": "Beautiful mountain landscape with sunset",
-      "updatedAt": "2024-01-15T11:00:00.000000",
-      "creator": {
-        "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-        "nickname": "artlover",
-        "mail": "artlover@example.com",
-        "createdAt": "2024-01-15T10:30:00.000000"
-      }
-    }
-  ]
+  "id": "product-id-here"
 }
 ```
 
@@ -425,38 +154,58 @@ GET /search?q=mountains
 
 ## 🖼️ Работа с изображениями
 
-### 11. Получить превью изображения
-**GET** `/images/thumbnails/{filename}`
+### 7. Создать новый арт (form-data)
+**POST** `/api/products`
 
-**Пример:**
-```
-GET /images/thumbnails/e7d13985-8136-4171-89db-5e464816b4ea_thumbnail.jpg
-```
+**Content-Type:** `multipart/form-data`
 
-**Ответ:** Бинарные данные изображения (JPEG, 400x400px)
+**Form Data:**
+| Поле | Тип | Обязательное | Описание |
+|------|-----|--------------|-----------|
+| `image` | file | ✅ | Изображение арта |
+| `title` | text | ✅ | Название арта |
+| `price` | text | ✅ | Цена |
+| `creator_id` | text | ✅ | ID создателя |
+| `description` | text | ❌ | Описание |
 
-### 12. Получить оригинальное изображение
-**GET** `/images/{filename}`
+**🔥 НОВЫЕ ОГРАНИЧЕНИЯ ДЛЯ ИЗОБРАЖЕНИЙ:**
+- **Максимальный размер файла:** 15MB
+- **Максимальное время обработки:** 30 секунд
+- **Максимальный размер изображения:** 10000x10000 пикселей
+- **Поддерживаемые форматы:** PNG, JPG, JPEG, GIF, WebP
+- **Автоматическое масштабирование:** Превью создаются с динамическим разрешением
 
-**Пример:**
-```
-GET /images/e7d13985-8136-4171-89db-5e464816b4ea_original.jpg
-```
+**Алгоритм масштабирования превью:**
+- **> 2000px:** уменьшается до 800x800px
+- **1000-2000px:** уменьшается до 1200x1200px  
+- **< 1000px:** сохраняется оригинальный размер (макс. 1600x1600px)
+
+---
+
+### 8. Получить изображение продукта
+**GET** `/photos/{product_id}`
 
 **Ответ:** Бинарные данные оригинального изображения
+
+### 9. Получить превью изображения
+**GET** `/api/images/thumbnail/{file_id}`
+
+**Ответ:** Бинарные данные превью (динамическое разрешение)
 
 ---
 
 ## 🩺 Системные эндпоинты
 
-### 13. Проверка здоровья API
-**GET** `/health`
+### 10. Проверка здоровья API
+**GET** `/api/health`
 
 **Успешный ответ (200):**
 ```json
 {
   "status": "healthy",
-  "message": "ArtMarket API is running"
+  "message": "RikoaTech ArtMarket API is running",
+  "timestamp": "2024-01-15T10:30:00.000000",
+  "version": "4.0"
 }
 ```
 
@@ -464,7 +213,7 @@ GET /images/e7d13985-8136-4171-89db-5e464816b4ea_original.jpg
 
 ## 📝 Примеры использования
 
-### cURL - Создание арта:
+### cURL - Создание арта с новыми ограничениями:
 ```bash
 curl -X POST http://localhost:5000/api/products \
   -F "image=@/path/to/your/image.jpg" \
@@ -474,91 +223,85 @@ curl -X POST http://localhost:5000/api/products \
   -F "description=This is my beautiful artwork"
 ```
 
-### Python - Создание арта:
+### Получить арты:
+```bash
+curl -X GET "http://localhost:5000/api/product?page=1"
+```
+
+---
+
+## 🌱 Заполнение базы данных
+
+**Конфигурация seed-скрипта:**
 ```python
-import requests
-
-url = "http://localhost:5000/api/products"
-
-with open('image.jpg', 'rb') as f:
-    files = {'image': f}
-    data = {
-        'title': 'My Amazing Art',
-        'price': '200',
-        'creator_id': 'user-uuid-here',
-        'description': 'This is my beautiful artwork'
-    }
-    response = requests.post(url, files=files, data=data)
-    print(response.json())
+NUM_USERS = 15                    # Количество пользователей
+NUM_PRODUCTS = 20                # Количество созданных артов
+PURCHASE_PERCENTAGE = 0.6        # Процент покупки артов
 ```
 
-### JavaScript - Создание арта:
-```javascript
-const formData = new FormData();
-formData.append('image', fileInput.files[0]);
-formData.append('title', 'My Amazing Art');
-formData.append('price', '200');
-formData.append('creator_id', 'user-uuid-here');
-formData.append('description', 'This is my beautiful artwork');
-
-fetch('http://localhost:5000/api/products', {
-    method: 'POST',
-    body: formData
-})
-.then(response => response.json())
-.then(data => console.log(data));
+**Запуск:**
+```bash
+python seed.py
 ```
+
+**🔥 ОСОБЕННОСТИ SEED-СКРИПТА:**
+- Использует динамическое разрешение для превью
+- Автоматически определяет оптимальный размер на основе оригиналов
+- Сохраняет превью в том же формате что и оригинал
 
 ---
 
 ## ⚠️ Обработка ошибок
 
-### Формат ошибки:
+### Новые ошибки обработки изображений:
 ```json
 {
-  "error": "Error description"
+  "error": "Image processing timeout - file too large or complex"
 }
 ```
 
-### Коды ошибок:
-- `400` - Bad Request (неверные параметры запроса)
-- `401` - Unauthorized (неверные учетные данные)
-- `404` - Not Found (ресурс не найден)
-- `413` - Payload Too Large (файл слишком большой)
-- `415` - Unsupported Media Type (неверный Content-Type)
-- `500` - Internal Server Error (внутренняя ошибка сервера)
+```json
+{
+  "error": "Image dimensions too large (max 10000x10000)"
+}
+```
+
+### Стандартные ошибки:
+- `400` - Bad Request
+- `401` - Unauthorized
+- `404` - Not Found
+- `413` - File too large
+- `415` - Unsupported Media Type
+- `500` - Internal Server Error
 
 ---
 
-## 🔧 Postman настройки
+## 🔧 Технические особенности
 
-### Environment Variables:
-- `base_url`: `http://localhost:5000/api`
-- `user_id`: (автоматически заполнится после регистрации)
-- `product_id`: (автоматически заполнится после создания арта)
+### Обработка изображений:
+- **Таймаут:** 30 секунд максимум
+- **Форматы превью:** Сохраняют оригинальный формат (PNG, JPG, etc.)
+- **Качество:** 85% для оригиналов, 80% для превью
+- **Оптимизация:** Автоматическая оптимизация размера файла
 
-### Тестовые скрипты:
-```javascript
-// После регистрации
-if (pm.response.code === 201) {
-    const data = pm.response.json();
-    pm.environment.set("user_id", data.id);
-}
-
-// После создания арта
-if (pm.response.code === 201) {
-    const data = pm.response.json();
-    pm.environment.set("product_id", data.id);
-}
-```
+### Производительность:
+- Многопоточная обработка с таймаутом
+- Логирование долгих операций (>10 секунд)
+- Динамическое определение размера превью
 
 ---
 
 ## 🚀 Рабочий процесс
 
-1. **Регистрация пользователя**
-2. **Логин для получения ID**
-3. **Создание арта через form-data**
-4. **Просмотр созданных артов**
-5. **Покупка артов другими пользователями**
-6. **Просмотр профиля с купленными и созданными артами**
+1. **Регистрация** через `/api/auth/register`
+2. **Логин** через `/api/auth/login` для получения токена
+3. **Создание артов** через `/api/products` с автоматической оптимизацией изображений
+4. **Просмотр артов** через `/api/product?page=1`
+5. **Покупка артов** через `/api/product/buy` с токеном
+6. **Просмотр изображений** через `/photos/{id}` и `/api/images/thumbnail/{id}`
+
+**🔥 ПРЕИМУЩЕСТВА v4.0:**
+- Улучшенная производительность за счет динамического масштабирования
+- Защита от зависаний при обработке больших файлов
+- Сохранение качества изображений при оптимизации размера
+- Поддержка широкого диапазона размеров исходных изображений
