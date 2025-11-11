@@ -2,6 +2,8 @@ from flask import Flask, request, jsonify, send_file
 from database import db_manager
 import os
 import datetime
+from datetime import timezone
+from datetime import datetime
 import uuid
 from PIL import Image
 from functools import wraps
@@ -203,7 +205,7 @@ def create_app():
         return jsonify({
             'status': 'healthy', 
             'message': 'RikoaTech ArtMarket API is running',
-            'timestamp': datetime.utcnow().isoformat(),
+            'timestamp': datetime.now(timezone.utc).isoformat(),
             'version': '3.0'
         })
 
