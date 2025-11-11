@@ -122,13 +122,14 @@ def seed_database_simple():
         users = []
         for i in range(NUM_USERS):
             try:
+                password = "123456"
                 user = db_manager.create_account(
                     nickname=f"artist_{i+1}",
                     mail=f"artist_{i+1}@gallery.com",
-                    password="123456"
+                    password=password
                 )
                 users.append(user)
-                print(f"   ✅ Создан пользователь: artist_{i+1}")
+                print(f'   ✅ Создан пользователь: artist_{i+1} Пароль: "{password}"')
             except Exception as e:
                 print(f"   ⚠️ Пользователь artist_{i+1} уже существует")
         

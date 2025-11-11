@@ -2,6 +2,7 @@ from models import db, Account, Product, Purchase
 from flask import Flask
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import desc
+from werkzeug.security import generate_password_hash, check_password_hash
 
 class DatabaseManager:
     def __init__(self, app: Flask = None):
@@ -15,7 +16,9 @@ class DatabaseManager:
     
     # Account methods
     def create_account(self, nickname: str, mail: str, password: str) -> Account:
-        account = Account(nickname=nickname, mail=mail, password=password)
+        # Генерация хэша пароля
+        password_hash = generate_password_hash(password)
+        account = Account(nickname=nickname, mail=mail, password=password_hash)
         db.session.add(account)
         try:
             db.session.commit()
@@ -25,7 +28,10 @@ class DatabaseManager:
             raise ValueError("Account with this nickname or mail already exists")
     
     def get_account_by_credentials(self, nickname: str, password: str) -> Account:
-        return Account.query.filter_by(nickname=nickname, password=password).first()
+        account = Account.query.filter_by(nickname=nickname).first()
+        if account and check_password_hash(account.password, password):
+            return account
+        return None
     
     def get_account_by_id(self, account_id: str) -> Account:
         return Account.query.get(account_id)
