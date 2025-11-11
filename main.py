@@ -15,11 +15,6 @@ def main():
     print("POST   /api/auth/register - Register")
     print("GET    /api/auth/profile - Get profile (Bearer token)")
     
-    print("\n📋 Legacy endpoints (for compatibility):")
-    print("GET    /api/products - Get products with pagination")
-    print("POST   /api/products - Create product")
-    print("GET    /api/products/<id> - Get product details")
-    
     return app
 
 if __name__ == "__main__":
