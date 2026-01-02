@@ -11,7 +11,7 @@ class MarketConfig:
     
     # БАЛАНС И ЦЕНЫ
     STARTING_BALANCE = 100           # Начальный баланс пользователя
-    MIN_PRODUCT_PRICE = 5            # Минимальная цена товара
+    MIN_PRODUCT_PRICE = 1            # Минимальная цена товара
     MAX_PRODUCT_PRICE = 10000        # Максимальная цена товара
     
     # ВЫСТАВЛЕНИЕ ТОВАРА

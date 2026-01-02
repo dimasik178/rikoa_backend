@@ -32,20 +32,60 @@ class SimpleFile:
         if self._file:
             self._file.close()
 
-def process_image_for_seed(file_path, upload_folder):
-    """Упрощенная обработка изображения для сидинга"""
+def process_uploaded_image_for_seed(file):
+    """Упрощенная обработка изображения для сидинга (отдельная от web_server)"""
     try:
-        # Используем ту же функцию, что и в web_server
-        from web_server import process_uploaded_image
+        # Определяем путь для загрузок
+        upload_folder = 'uploads'
+        os.makedirs(upload_folder, exist_ok=True)
+        os.makedirs(os.path.join(upload_folder, 'thumbnails'), exist_ok=True)
         
-        file_obj = SimpleFile(file_path)
-        image_info, error = process_uploaded_image(file_obj)
-        file_obj.close()
+        file.seek(0, os.SEEK_END)
+        file_size = file.tell()
+        file.seek(0)
         
-        return image_info, error
+        if file_size > 15 * 1024 * 1024:
+            return None, "Файл слишком большой (максимум 15MB)"
+        
+        image = Image.open(file)
+        width, height = image.size
+        
+        if width > 10000 or height > 10000:
+            return None, "Размеры изображения слишком большие (максимум 10000x10000)"
+        
+        if image.format not in ['JPEG', 'PNG', 'GIF', 'WEBP', 'BMP', 'TIFF']:
+            return None, "Неподдерживаемый формат изображения"
+        
+        # Генерируем уникальный ID для файла
+        file_id = str(uuid.uuid4())
+        original_extension = image.format.lower()
+        
+        # Создаем превью
+        thumbnail_size = (800, 800)
+        thumbnail_filename = f"{file_id}_thumbnail.{original_extension}"
+        thumbnail_path = os.path.join(upload_folder, 'thumbnails', thumbnail_filename)
+        
+        # Сохраняем превью
+        image.thumbnail(thumbnail_size, Image.Resampling.LANCZOS)
+        
+        if image.format == 'PNG':
+            image.save(thumbnail_path, optimize=True)
+        else:
+            if image.mode in ('RGBA', 'LA', 'P'):
+                background = Image.new('RGB', image.size, (255, 255, 255))
+                background.paste(image, mask=image.split()[-1] if image.mode == 'RGBA' else None)
+                image = background
+            image.save(thumbnail_path, optimize=True, quality=85)
+        
+        image.close()
+        
+        return {
+            'thumbnail': thumbnail_filename,
+            'file_id': file_id
+        }, None
         
     except Exception as e:
-        return None, f"Image processing error: {str(e)}"
+        return None, f"Ошибка обработки изображения: {str(e)}"
 
 def seed_database():
     """Заполнение базы данных тестовыми данными"""
@@ -66,6 +106,8 @@ def seed_database():
         photo_examples_dir = 'photo_examples'
         if not os.path.exists(photo_examples_dir):
             print("❌ Папка photo_examples не найдена! Создайте папку с изображениями.")
+            print("   mkdir photo_examples")
+            print("   # поместите туда несколько изображений (.jpg, .png и т.д.)")
             return
         
         image_files = [f for f in os.listdir(photo_examples_dir) 
@@ -73,6 +115,7 @@ def seed_database():
         
         if not image_files:
             print("❌ Нет изображений в папке photo_examples!")
+            print("   Поместите несколько изображений в папку photo_examples/")
             return
         
         print(f"📁 Найдено {len(image_files)} изображений")
@@ -92,6 +135,10 @@ def seed_database():
             except Exception as e:
                 print(f"   ⚠️ Пользователь user_{i+1} уже существует или ошибка: {e}")
         
+        if not users:
+            print("❌ Не удалось создать пользователей!")
+            return
+        
         # Список прилагательных для названий
         adjectives = [
             "Уникальный", "Эксклюзивный", "Ценный", "Редкий", "Премиальный",
@@ -108,7 +155,9 @@ def seed_database():
         print("\n🎨 Создаем товары...")
         products = []
         
-        selected_images = random.sample(image_files, min(NUM_PRODUCTS, len(image_files)))
+        # Берем первые N изображений или все, если их меньше
+        num_products_to_create = min(NUM_PRODUCTS, len(image_files))
+        selected_images = image_files[:num_products_to_create]
         
         for i, image_file in enumerate(selected_images):
             try:
@@ -121,12 +170,12 @@ def seed_database():
                 title = f"{adjective} {noun} #{i+1}"
                 
                 # Генерируем цену (от 10 до 100 AC)
-                price = random.randint(10, 100)
+                price = random.randint(1, 10)
                 
                 # Рассчитываем стартовый капитал
                 startup_capital = price * MarketConfig.SELLER_STARTUP_MULTIPLIER
                 
-                print(f"   Создаем товар: {title} (цена: {price} AC, стартовый капитал: {startup_capital} AC)")
+                print(f"   [{i+1}/{num_products_to_create}] Создаем товар: {title} (цена: {price} AC, стартовый капитал: {startup_capital} AC)")
                 
                 # Проверяем баланс продавца
                 if creator.balance < startup_capital:
@@ -140,11 +189,16 @@ def seed_database():
                     continue
                 
                 # Обрабатываем изображение
-                upload_folder = app.config['UPLOAD_FOLDER']
-                image_info, error = process_image_for_seed(image_path, upload_folder)
+                file_obj = SimpleFile(image_path)
+                image_info, error = process_uploaded_image_for_seed(file_obj)
+                file_obj.close()
                 
                 if error:
                     print(f"   ❌ Ошибка обработки изображения: {error}")
+                    continue
+                
+                if not image_info:
+                    print(f"   ❌ Не удалось обработать изображение")
                     continue
                 
                 # Создаем товар
@@ -162,6 +216,10 @@ def seed_database():
             except Exception as e:
                 print(f"   ❌ Ошибка создания товара: {e}")
         
+        if not products:
+            print("❌ Не удалось создать ни одного товара!")
+            return
+        
         # Создаем подписки
         print("\n💰 Создаем подписки...")
         subscription_count = 0
@@ -174,23 +232,22 @@ def seed_database():
             # Исключаем продавца из списка потенциальных подписчиков
             potential_subscribers = [user for user in users if user.id != product.creator_id]
             
-            if potential_subscribers:
-                # Выбираем подписчиков
-                subscribers = random.sample(
-                    potential_subscribers, 
-                    min(num_subscriptions, len(potential_subscribers))
-                )
+            if potential_subscribers and num_subscriptions > 0:
+                # Выбираем подписчиков (но не больше, чем есть)
+                num_to_select = min(num_subscriptions, len(potential_subscribers))
+                subscribers = random.sample(potential_subscribers, num_to_select)
                 
                 for subscriber in subscribers:
                     try:
                         # Проверяем баланс подписчика
                         if subscriber.balance >= product.current_price:
                             result = db_manager.subscribe_to_product(subscriber.id, product.id)
-                            if result['success']:
+                            if result.get('success'):
                                 subscription_count += 1
                                 print(f"   ✅ Подписка: {subscriber.nickname} → {product.title} за {product.current_price} AC")
                             else:
-                                print(f"   ⚠️ Ошибка подписки: {result.get('error', 'Unknown error')}")
+                                error_msg = result.get('error', 'Unknown error')
+                                print(f"   ⚠️ Ошибка подписки: {error_msg}")
                     except Exception as e:
                         print(f"   ⚠️ Ошибка при создании подписки: {e}")
         
@@ -217,13 +274,14 @@ def seed_database():
             print(f"   {user.nickname}: {user.balance} AC (товаров: {active_products}, подписок: {subscriptions})")
         
         print("\n🔗 API доступно по адресу: http://localhost:5000")
-        print("📚 Документация API:")
+        print("📚 Основные эндпоинты API:")
         print("   GET  /api/health - проверка работы")
         print("   POST /api/auth/register - регистрация")
         print("   POST /api/auth/login - вход")
         print("   GET  /api/products - список товаров")
         print("   POST /api/products - создать товар")
         print("   GET  /api/products/<id> - информация о товаре")
+        print("\n🚀 Для запуска сервера выполните: python main.py")
 
 if __name__ == "__main__":
     seed_database()

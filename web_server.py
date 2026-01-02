@@ -485,6 +485,7 @@ def create_app():
         except ValueError as e:
             return jsonify({'success': False, 'error': str(e)}), 400
         except Exception as e:
+            # print(e) # TODO Ошибка, при снятии товара с продажи (500) 
             return jsonify({'success': False, 'error': 'Ошибка снятия товара'}), 500
     
     # 12. Удаление прогоревшего товара
