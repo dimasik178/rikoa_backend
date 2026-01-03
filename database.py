@@ -243,28 +243,42 @@ class DatabaseManager:
         # Получаем продавца
         seller = self.get_account_by_id(seller_id)
         
-        # Переводим весь портфель на баланс продавца
-        seller.balance += product.portfolio
+        # # Начинаем транзакцию
+        # db.session.begin() TODO удалить строку
         
-        # Отменяем все активные подписки
-        active_subscriptions = Subscription.query.filter_by(
-            product_id=product_id,
-            status='active'
-        ).all()
-        
-        for subscription in active_subscriptions:
-            subscription.status = 'cancelled'
-        
-        # Полностью удаляем товар из БД
-        db.session.delete(product)
-        db.session.commit()
-        
-        return {
-            'success': True,
-            'message': f'Товар снят с продажи. Получено: {product.portfolio} AC',
-            'portfolio_transferred': product.portfolio,
-            'subscriptions_cancelled': len(active_subscriptions)
-        }
+        try:
+            # 1. Переводим весь портфель на баланс продавца
+            seller.balance += product.portfolio
+            
+            # 2. Сначала УДАЛЯЕМ все подписки
+            # (нельзя оставлять с product_id на несуществующий товар)
+            active_subscriptions = Subscription.query.filter_by(
+                product_id=product_id,
+                status='active'
+            ).all()
+            
+            subscription_ids = [sub.id for sub in active_subscriptions]
+            
+            # Удаляем подписки
+            for subscription in active_subscriptions:
+                db.session.delete(subscription)
+            
+            # 3. Удаляем товар
+            db.session.delete(product)
+            
+            db.session.commit()
+            
+            return {
+                'success': True,
+                'message': f'Товар снят с продажи. Получено: {product.portfolio} AC',
+                'portfolio_transferred': product.portfolio,
+                'subscriptions_cancelled': len(active_subscriptions),
+                'subscription_ids_deleted': subscription_ids
+            }
+            
+        except Exception as e:
+            db.session.rollback()
+            raise ValueError(f'Ошибка при снятии товара: {str(e)}')
     
     def delete_burned_product(self, product_id: str, seller_id: str):
         """Удаляет прогоревший товар из лотов продавца"""
@@ -402,12 +416,12 @@ class DatabaseManager:
             status='active'
         ).order_by(desc(Subscription.id)).all()
     
-    def get_product_subscribers(self, product_id: str):
-        """Получает подписчиков товара"""
-        return Subscription.query.filter_by(
-            product_id=product_id,
-            status='active'
-        ).all()
+    # def get_product_subscribers(self, product_id: str): TODO Возможно для ненужного роута
+    #     """Получает подписчиков товара"""
+    #     return Subscription.query.filter_by(
+    #         product_id=product_id,
+    #         status='active'
+    #     ).all()
     
     # ========== ПОИСК ==========
     

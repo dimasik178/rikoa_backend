@@ -612,32 +612,32 @@ def create_app():
             'data': subscriptions_data
         })
     
-    # 16. Получение подписчиков товара
-    @app.route('/api/products/<product_id>/subscribers', methods=['GET'])
-    def get_product_subscribers(product_id):
-        product = db_manager.get_product(product_id)
-        if not product:
-            return jsonify({'success': False, 'error': 'Товар не найден'}), 404
+    # # 16. Получение подписчиков товара TODO Возможно лишний роут
+    # @app.route('/api/products/<product_id>/subscribers', methods=['GET'])
+    # def get_product_subscribers(product_id):
+    #     product = db_manager.get_product(product_id)
+    #     if not product:
+    #         return jsonify({'success': False, 'error': 'Товар не найден'}), 404
         
-        subscribers = db_manager.get_product_subscribers(product_id)
+    #     subscribers = db_manager.get_product_subscribers(product_id)
         
-        subscribers_data = []
-        for subscription in subscribers:
-            account = db_manager.get_account_by_id(subscription.subscriber_id)
-            if account:
-                subscribers_data.append({
-                    'account': account.to_dict(),
-                    'subscription_price': subscription.subscription_price,
-                    'current_price': product.current_price
-                })
+    #     subscribers_data = []
+    #     for subscription in subscribers:
+    #         account = db_manager.get_account_by_id(subscription.subscriber_id)
+    #         if account:
+    #             subscribers_data.append({
+    #                 'account': account.to_dict(),
+    #                 'subscription_price': subscription.subscription_price,
+    #                 'current_price': product.current_price
+    #             })
         
-        return jsonify({
-            'success': True,
-            'data': {
-                'product': product.to_dict_public(),
-                'subscribers': subscribers_data,
-                'total': len(subscribers_data)
-            }
-        })
+    #     return jsonify({
+    #         'success': True,
+    #         'data': {
+    #             'product': product.to_dict_public(),
+    #             'subscribers': subscribers_data,
+    #             'total': len(subscribers_data)
+    #         }
+    #     })
     
     return app

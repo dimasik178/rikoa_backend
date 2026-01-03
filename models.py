@@ -171,7 +171,9 @@ class Subscription(db.Model):
     
     id = db.Column(db.String(36), primary_key=True, default=generate_uuid)
     subscriber_id = db.Column(db.String(36), db.ForeignKey('accounts.id'), nullable=False)
-    product_id = db.Column(db.String(36), db.ForeignKey('products.id'), nullable=False)
+    # product_id = db.Column(db.String(36), db.ForeignKey('products.id'), nullable=False)
+    # Меняем на nullable=True!
+    product_id = db.Column(db.String(36), db.ForeignKey('products.id', ondelete='SET NULL'), nullable=True)
     
     # 💰 ФИНАНСОВЫЕ ДАННЫЕ
     subscription_price = db.Column(db.Integer, nullable=False)  # Цена при подписке
