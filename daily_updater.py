@@ -28,10 +28,13 @@ def update_daily_prices():
 if __name__ == "__main__":
     # Запускаем в 0:00 каждый день
     schedule.every().day.at("00:00").do(update_daily_prices)
+    # schedule.every(5).minutes.do(update_daily_prices) # TEST
     
     print("⏰ Планировщик ежедневного обновления запущен")
     
     # Бесконечный цикл
     while True:
+        # input() # TEST
+        # update_daily_prices() # TEST
         schedule.run_pending()
         time.sleep(60)  # Проверяем каждую минуту

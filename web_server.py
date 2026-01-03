@@ -518,19 +518,6 @@ def create_app():
             # print(e) # TODO Ошибка, при снятии товара с продажи (500) 
             return jsonify({'success': False, 'error': 'Ошибка снятия товара'}), 500
     
-    # # 12. Удаление прогоревшего товара TODO Вместо этого используется /api/products/<product_id>/remove
-    # @app.route('/api/products/<product_id>', methods=['DELETE'])
-    # @token_required
-    # def delete_burned_product(current_account, product_id):
-    #     try:
-    #         result = db_manager.delete_burned_product(product_id, current_account.id)
-    #         return jsonify(result)
-            
-    #     except ValueError as e:
-    #         return jsonify({'success': False, 'error': str(e)}), 400
-    #     except Exception as e:
-    #         return jsonify({'success': False, 'error': 'Ошибка удаления товара'}), 500
-    
     # 13. Поиск товаров
     @app.route('/api/products/search', methods=['GET'])
     def search_products():
@@ -641,33 +628,5 @@ def create_app():
             'success': True,
             'data': subscriptions_data
         })
-    
-    # # 16. Получение подписчиков товара TODO Возможно лишний роут
-    # @app.route('/api/products/<product_id>/subscribers', methods=['GET'])
-    # def get_product_subscribers(product_id):
-    #     product = db_manager.get_product(product_id)
-    #     if not product:
-    #         return jsonify({'success': False, 'error': 'Товар не найден'}), 404
-        
-    #     subscribers = db_manager.get_product_subscribers(product_id)
-        
-    #     subscribers_data = []
-    #     for subscription in subscribers:
-    #         account = db_manager.get_account_by_id(subscription.subscriber_id)
-    #         if account:
-    #             subscribers_data.append({
-    #                 'account': account.to_dict(),
-    #                 'subscription_price': subscription.subscription_price,
-    #                 'current_price': product.current_price
-    #             })
-        
-    #     return jsonify({
-    #         'success': True,
-    #         'data': {
-    #             'product': product.to_dict_public(),
-    #             'subscribers': subscribers_data,
-    #             'total': len(subscribers_data)
-    #         }
-    #     })
     
     return app

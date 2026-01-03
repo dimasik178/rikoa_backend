@@ -319,50 +319,6 @@ class DatabaseManager:
             db.session.rollback()
             raise ValueError(f'Ошибка: {str(e)}')
     
-    # def delete_burned_product(self, product_id: str, seller_id: str):
-    #     """Продавец скрывает прогоревший товар из своего профиля"""
-    #     product = self.get_product(product_id)
-    #     if not product:
-    #         raise ValueError("Товар не найден")
-        
-    #     # Проверяем права продавца
-    #     if product.creator_id != seller_id:
-    #         raise ValueError("Только владелец может скрыть товар")
-        
-    #     if product.status not in ['burned', 'burned_hidden']:
-    #         raise ValueError("Можно скрывать только прогоревшие товары")
-        
-    #     if product.status == 'burned_hidden':
-    #         return {
-    #             'success': True,
-    #             'message': 'Товар уже скрыт'
-    #         }
-        
-    #     # Меняем статус на burned_hidden
-    #     product.status = 'burned_hidden'
-        
-    #     # Проверяем, нужно ли удалять товар полностью
-    #     # (если нет подписчиков)
-    #     remaining_subs = Subscription.query.filter_by(
-    #         product_id=product_id
-    #     ).count()
-        
-    #     if remaining_subs == 0:
-    #         db.session.delete(product)
-    #         db.session.commit()
-    #         return {
-    #             'success': True,
-    #             'message': 'Товар скрыт и удален (не осталось подписчиков)',
-    #             'product_deleted': True
-    #         }
-        
-    #     db.session.commit()
-    #     return {
-    #         'success': True,
-    #         'message': 'Товар скрыт из профиля продавца',
-    #         'product_deleted': False
-    #     }
-    
     # ========== ПОДПИСКИ ==========
     
     def subscribe_to_product(self, account_id: str, product_id: str):
@@ -447,12 +403,14 @@ class DatabaseManager:
                     # Меняем статус товара
                     product.status = 'burned'
                     product.portfolio = 0
-                    product.subscriptions_money = 0
+                    product.subscriptions_money -= payout_amount
+                    product.active_subscriptions_count -= 1
                 else:
                     # Обычная отписка - удаляем подписку
                     db.session.delete(subscription)
                     product.portfolio -= payout_amount
                     product.subscriptions_money -= payout_amount
+                    product.active_subscriptions_count -= 1
                 
                 # Выплачиваем пользователю
                 user = self.get_account_by_id(account_id)
@@ -511,13 +469,6 @@ class DatabaseManager:
             subscriber_id=account_id,
             status='active'
         ).order_by(desc(Subscription.id)).all()
-    
-    # def get_product_subscribers(self, product_id: str): TODO Возможно для ненужного роута
-    #     """Получает подписчиков товара"""
-    #     return Subscription.query.filter_by(
-    #         product_id=product_id,
-    #         status='active'
-    #     ).all()
     
     # ========== ПОИСК ==========
     
