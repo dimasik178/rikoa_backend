@@ -197,7 +197,7 @@ class DatabaseManager:
         ).paginate(page=page, per_page=per_page, error_out=False)
     
     def get_user_products(self, account_id: str):
-        """Получает товары пользователя (активные и прогоревшие)"""
+        """Получает товары пользователя (active и burned, но не burned_hidden)"""
         return Product.query.filter_by(creator_id=account_id).filter(
             Product.status.in_(['active', 'burned'])
         ).order_by(desc(Product.created_at)).all()
@@ -231,77 +231,137 @@ class DatabaseManager:
         return product
     
     def remove_product(self, product_id: str, seller_id: str):
-        """Снимает товар с продажи (продавец забирает весь портфель)"""
+        """Снимает товар с продажи или скрывает прогоревший товар"""
         product = self.get_product(product_id)
         if not product:
             raise ValueError("Товар не найден")
         
-        # Проверяем права продавца
         if product.creator_id != seller_id:
-            raise ValueError("Только владелец может снять товар")
+            raise ValueError("Только владелец может снять/скрыть товар")
         
-        # Получаем продавца
         seller = self.get_account_by_id(seller_id)
-        
-        # # Начинаем транзакцию
-        # db.session.begin() TODO удалить строку
-        
         try:
-            # 1. Переводим весь портфель на баланс продавца
-            seller.balance += product.portfolio
+            # СЛУЧАЙ 1: Активный товар
+            if product.status == 'active':
+                # 1. Продавец забирает ВЕСЬ портфель
+                seller.balance += product.portfolio
+                
+                # 2. Все активные подписки становятся 'cancelled'
+                active_subscriptions = Subscription.query.filter_by(
+                    product_id=product_id,
+                    status='active'
+                ).all()
+                
+                subscription_ids = [sub.id for sub in active_subscriptions]
+
+                for subscription in active_subscriptions:
+                    subscription.status = 'cancelled'
+
+                # 3. Товар становится burned_hidden
+                product.status = 'burned_hidden'
+                portfolio = product.portfolio
+                product.portfolio = 0
+                
+                db.session.commit()
+                
+                return {
+                    'success': True,
+                    'message': f'Товар снят с продажи. Получено: {portfolio} AC',
+                    'portfolio_transferred': product.portfolio,
+                    'subscriptions_cancelled': len(active_subscriptions),
+                    'subscription_ids_deleted': subscription_ids,
+                    'product_status': 'burned_hidden'
+                }
+
+            # СЛУЧАЙ 2: Прогоревший товар (burned)
+            elif product.status == 'burned':
+                # 1. Просто меняем статус на burned_hidden
+                product.status = 'burned_hidden'
+                
+                # 2. Проверяем, нужно ли удалять товар полностью
+                # (если нет подписчиков)
+                remaining_subs = Subscription.query.filter_by(
+                    product_id=product_id,
+                ).all()
+
+                if len(remaining_subs) == 0:
+                    db.session.delete(product)
+                    db.session.commit()
+                    return {
+                        'success': True,
+                        'message': 'Товар скрыт и удален (не осталось подписчиков)',
+                        'portfolio_transferred': 0,
+                        'product_deleted': True
+                    }
+                subscription_ids = [sub.id for sub in active_subscriptions]
+                db.session.commit()
+                return {
+                    'success': True,
+                    'message': 'Товар скрыт из профиля продавца',
+                    'subscription_ids_deleted': subscription_ids,
+                    'portfolio_transferred': 0,
+                    'product_deleted': False
+                }
             
-            # 2. Сначала УДАЛЯЕМ все подписки
-            # (нельзя оставлять с product_id на несуществующий товар)
-            active_subscriptions = Subscription.query.filter_by(
-                product_id=product_id,
-                status='active'
-            ).all()
+            # СЛУЧАЙ 3: Уже скрытый товар
+            elif product.status == 'burned_hidden':
+                return {
+                    'success': True,
+                    'message': 'Товар уже скрыт',
+                    'portfolio_transferred': 0,
+                    'product_deleted': False
+                }
             
-            subscription_ids = [sub.id for sub in active_subscriptions]
-            
-            # Удаляем подписки
-            for subscription in active_subscriptions:
-                db.session.delete(subscription)
-            
-            # 3. Удаляем товар
-            db.session.delete(product)
-            
-            db.session.commit()
-            
-            return {
-                'success': True,
-                'message': f'Товар снят с продажи. Получено: {product.portfolio} AC',
-                'portfolio_transferred': product.portfolio,
-                'subscriptions_cancelled': len(active_subscriptions),
-                'subscription_ids_deleted': subscription_ids
-            }
-            
+            else:
+                raise ValueError(f"Неизвестный статус товара: {product.status}")
+                
         except Exception as e:
             db.session.rollback()
-            raise ValueError(f'Ошибка при снятии товара: {str(e)}')
+            raise ValueError(f'Ошибка: {str(e)}')
     
-    def delete_burned_product(self, product_id: str, seller_id: str):
-        """Удаляет прогоревший товар из лотов продавца"""
-        product = self.get_product(product_id)
-        if not product:
-            raise ValueError("Товар не найден")
+    # def delete_burned_product(self, product_id: str, seller_id: str):
+    #     """Продавец скрывает прогоревший товар из своего профиля"""
+    #     product = self.get_product(product_id)
+    #     if not product:
+    #         raise ValueError("Товар не найден")
         
-        # Проверяем права продавца
-        if product.creator_id != seller_id:
-            raise ValueError("Только владелец может удалить товар")
+    #     # Проверяем права продавца
+    #     if product.creator_id != seller_id:
+    #         raise ValueError("Только владелец может скрыть товар")
         
-        # Проверяем статус товара
-        if product.status != 'burned':
-            raise ValueError("Можно удалять только прогоревшие товары")
+    #     if product.status not in ['burned', 'burned_hidden']:
+    #         raise ValueError("Можно скрывать только прогоревшие товары")
         
-        # Полностью удаляем товар из БД
-        db.session.delete(product)
-        db.session.commit()
+    #     if product.status == 'burned_hidden':
+    #         return {
+    #             'success': True,
+    #             'message': 'Товар уже скрыт'
+    #         }
         
-        return {
-            'success': True,
-            'message': 'Прогоревший товар удален'
-        }
+    #     # Меняем статус на burned_hidden
+    #     product.status = 'burned_hidden'
+        
+    #     # Проверяем, нужно ли удалять товар полностью
+    #     # (если нет подписчиков)
+    #     remaining_subs = Subscription.query.filter_by(
+    #         product_id=product_id
+    #     ).count()
+        
+    #     if remaining_subs == 0:
+    #         db.session.delete(product)
+    #         db.session.commit()
+    #         return {
+    #             'success': True,
+    #             'message': 'Товар скрыт и удален (не осталось подписчиков)',
+    #             'product_deleted': True
+    #         }
+        
+    #     db.session.commit()
+    #     return {
+    #         'success': True,
+    #         'message': 'Товар скрыт из профиля продавца',
+    #         'product_deleted': False
+    #     }
     
     # ========== ПОДПИСКИ ==========
     
@@ -356,58 +416,94 @@ class DatabaseManager:
         subscription = Subscription.query.filter_by(
             subscriber_id=account_id,
             product_id=product_id,
-            status='active'
         ).first()
         
         if not subscription:
             raise ValueError("Активная подписка не найдена")
         
+        product : Product
         product = subscription.product
         
-        # Проверяем, что товар активен или прогорел
-        if product.status not in ['active', 'burned']:
-            raise ValueError("Товар не доступен для отписки")
+        # СЛУЧАЙ 1: Товар active - обычная отписка с выплатой
+        if product.status == 'active':
+            def transaction():
+                # Проверяем, хватит ли денег в портфеле
+                payout_amount = product.current_price
+                is_burned = False
+                
+                if product.portfolio < product.current_price:
+                    # Товар прогорает!
+                    payout_amount = product.portfolio
+                    is_burned = True
+                    
+                    # Меняем статус ВСЕХ подписок этого товара на 'cancelled'
+                    all_subscriptions = Subscription.query.filter_by(
+                        product_id=product_id,
+                        status='active'
+                    ).all()
+                    for sub in all_subscriptions:
+                        sub.status = 'cancelled'
+                    
+                    # Меняем статус товара
+                    product.status = 'burned'
+                    product.portfolio = 0
+                    product.subscriptions_money = 0
+                else:
+                    # Обычная отписка - удаляем подписку
+                    db.session.delete(subscription)
+                    product.portfolio -= payout_amount
+                    product.subscriptions_money -= payout_amount
+                
+                # Выплачиваем пользователю
+                user = self.get_account_by_id(account_id)
+                user.balance += payout_amount
+                
+                return {
+                    'payout_amount': payout_amount,
+                    'is_burned': is_burned,
+                    'product_status': product.status
+                }
+            
+            result = TransactionManager.execute_transaction(transaction)
+            
+            response = {
+                'success': True,
+                'message': f'Отписка выполнена. Выплачено: {result["payout_amount"]} AC',
+                'payout_amount': result['payout_amount']
+            }
+            
+            if result['is_burned']:
+                response['warning'] = 'Товар прогорел из-за недостатка средств в портфеле'
+            
+            return response
         
-        # Выполняем транзакцию
-        def transaction():
-            payout_amount, is_burned = SubscriptionManager.unsubscribe_user(
-                subscription, product.current_price, product.portfolio
-            )
+        # СЛУЧАЙ 2: Товар burned или burned_hidden - просто удаляем подписку
+        elif product.status in ['burned', 'burned_hidden']:
+            # Просто удаляем подписку (денег не возвращаем)
+            db.session.delete(subscription)
             
-            # Получаем пользователя
-            user = self.get_account_by_id(account_id)
+            # Проверяем, нужно ли удалять товар полностью
+            # (burned_hidden + нет подписчиков)
+            if product.status == 'burned_hidden':
+                remaining_subs = Subscription.query.filter_by(
+                    product_id=product_id
+                ).count()
+                
+                if remaining_subs == 0:
+                    # Полностью удаляем товар из БД
+                    db.session.delete(product)
             
-            # Выплачиваем деньги пользователю
-            user.balance += payout_amount
-            
-            # Обновляем портфель товара
-            product.portfolio -= payout_amount
-            product.subscriptions_money -= product.current_price  # Вычитаем по текущей цене
-            product.active_subscriptions_count -= 1
-            
-            # Если товар прогорел
-            if is_burned:
-                product.status = 'burned'
-                product.portfolio = 0
+            db.session.commit()
             
             return {
-                'payout_amount': payout_amount,
-                'is_burned': is_burned,
-                'product_status': product.status
+                'success': True,
+                'message': 'Отписка от прогоревшего товара выполнена',
+                'payout_amount': 0,
+                'product_deleted': product.status == 'burned_hidden' and not Subscription.query.filter_by(product_id=product_id).first()
             }
         
-        result = TransactionManager.execute_transaction(transaction)
-        
-        response = {
-            'success': True,
-            'message': f'Отписка выполнена. Выплачено: {result["payout_amount"]} AC',
-            'payout_amount': result['payout_amount']
-        }
-        
-        if result['is_burned']:
-            response['warning'] = 'Товар прогорел из-за недостатка средств в портфеле'
-        
-        return response
+        else:
+            raise ValueError(f"Неизвестный статус товара: {product.status}")
     
     def get_user_subscriptions(self, account_id: str):
         """Получает подписки пользователя"""

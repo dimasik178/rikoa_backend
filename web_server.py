@@ -298,17 +298,49 @@ def create_app():
             return jsonify({'success': False, 'error': 'Товар не найден'}), 404
         
         # Проверяем статус товара
-        if product.status == 'burned':
-            # Для прогоревшего товара только базовая информация
-            if not token or db_manager.get_account_by_id(token).id != product.creator_id:
-                return jsonify({
-                    'success': True,
-                    'data': {
-                        **product.to_dict_public(),
-                        'status': 'burned',
-                        'message': 'Этот товар прогорел'
-                    }
-                })
+        if product.status == 'burned_hidden':
+            # Скрытый товар - показываем только подписчикам
+            if not token:
+                return jsonify({'success': False, 'error': 'Товар не найден'}), 404
+            
+            account = db_manager.get_account_by_id(token)
+            if not account:
+                return jsonify({'success': False, 'error': 'Товар не найден'}), 404
+            
+            # Проверяем, есть ли у пользователя подписка на этот товар
+            has_subscription = Subscription.query.filter_by(
+                subscriber_id=account.id,
+                product_id=product.id
+            ).first() is not None
+            
+            if not has_subscription:
+                return jsonify({'success': False, 'error': 'Товар не найден'}), 404
+        
+        elif product.status == 'burned':
+            # Прогоревший товар - показываем продавцу и подписчикам
+            if token:
+                account = db_manager.get_account_by_id(token)
+                if account:
+                    is_seller = product.creator_id == account.id
+                    has_subscription = Subscription.query.filter_by(
+                        subscriber_id=account.id,
+                        product_id=product.id
+                    ).first() is not None
+                    
+                    if is_seller or has_subscription:
+                        # Показываем специальную версию для burned
+                        return jsonify({
+                            'success': True,
+                            'data': {
+                                'id': product.id,
+                                'title': product.title,
+                                'status': product.status,
+                                'current_price': product.current_price,
+                                'portfolio': product.portfolio,
+                                'startup_capital': product.startup_capital,
+                                'message': 'Товар прогорел'
+                            }
+                        })
         
         if not token:
             # Без токена
@@ -331,11 +363,10 @@ def create_app():
                 'data': product.to_dict_for_creator()
             })
         else:
-            # Проверяем подписку
+            # Ищем любую подписку пользователя на товар (active или cancelled)
             subscription = Subscription.query.filter_by(
                 subscriber_id=account.id,
                 product_id=product.id,
-                status='active'
             ).first()
             
             if subscription:
@@ -477,29 +508,28 @@ def create_app():
     # 11. Снятие товара с продажи
     @app.route('/api/products/<product_id>/remove', methods=['POST'])
     @token_required
-    def remove_product(current_account, product_id):
+    def remove_product_from_sale(current_account, product_id):
         try:
             result = db_manager.remove_product(product_id, current_account.id)
             return jsonify(result)
-            
         except ValueError as e:
             return jsonify({'success': False, 'error': str(e)}), 400
         except Exception as e:
             # print(e) # TODO Ошибка, при снятии товара с продажи (500) 
             return jsonify({'success': False, 'error': 'Ошибка снятия товара'}), 500
     
-    # 12. Удаление прогоревшего товара
-    @app.route('/api/products/<product_id>', methods=['DELETE'])
-    @token_required
-    def delete_burned_product(current_account, product_id):
-        try:
-            result = db_manager.delete_burned_product(product_id, current_account.id)
-            return jsonify(result)
+    # # 12. Удаление прогоревшего товара TODO Вместо этого используется /api/products/<product_id>/remove
+    # @app.route('/api/products/<product_id>', methods=['DELETE'])
+    # @token_required
+    # def delete_burned_product(current_account, product_id):
+    #     try:
+    #         result = db_manager.delete_burned_product(product_id, current_account.id)
+    #         return jsonify(result)
             
-        except ValueError as e:
-            return jsonify({'success': False, 'error': str(e)}), 400
-        except Exception as e:
-            return jsonify({'success': False, 'error': 'Ошибка удаления товара'}), 500
+    #     except ValueError as e:
+    #         return jsonify({'success': False, 'error': str(e)}), 400
+    #     except Exception as e:
+    #         return jsonify({'success': False, 'error': 'Ошибка удаления товара'}), 500
     
     # 13. Поиск товаров
     @app.route('/api/products/search', methods=['GET'])
@@ -604,7 +634,7 @@ def create_app():
             product = db_manager.get_product(subscription.product_id)
             if product:
                 sub_data = subscription.to_dict()
-                sub_data['product'] = product.to_dict_public()
+                # sub_data['product'] = product.to_dict_public() TODO должно быть реализовано в Subscription.to_dict
                 subscriptions_data.append(sub_data)
         
         return jsonify({
