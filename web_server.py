@@ -6,14 +6,24 @@ from datetime import timezone, datetime
 import uuid
 from PIL import Image
 from functools import wraps
-import threading
-import time
-from config import ServerConfig, ApiConfig, MarketConfig
+from config import ServerConfig, ApiConfig, MarketConfig, JWTConfig
 from search_engine import search_engine
 from models import Product, Subscription
-
+from jwt_manager import jwt_manager
+from dotenv import load_dotenv
+    
 def create_app():
+    load_dotenv()  # Загружаем переменные
+    
     app = Flask(__name__)
+    
+    # Используем FLASK_ENV для конфигурации
+    if os.getenv('FLASK_ENV') == 'development':
+        app.config['DEBUG'] = True
+        app.config['TESTING'] = True
+    else:
+        app.config['DEBUG'] = False
+        app.config['TESTING'] = False
     
     # Конфигурация Flask
     app.config['SQLALCHEMY_DATABASE_URI'] = ServerConfig.SQLALCHEMY_DATABASE_URI
@@ -24,6 +34,15 @@ def create_app():
     app.config['ALLOWED_EXTENSIONS'] = ServerConfig.ALLOWED_EXTENSIONS
     app.config['MAX_PROCESSING_TIME'] = ServerConfig.MAX_PROCESSING_TIME
     app.config['MAX_IMAGE_DIMENSION'] = ServerConfig.MAX_IMAGE_DIMENSION
+    
+    # JWT конфигурация
+    app.config['JWT_SECRET_KEY'] = JWTConfig.SECRET_KEY
+    app.config['JWT_ALGORITHM'] = JWTConfig.ALGORITHM
+    app.config['JWT_ACCESS_TOKEN_EXPIRES'] = JWTConfig.ACCESS_TOKEN_EXPIRES
+    app.config['JWT_REFRESH_TOKEN_EXPIRES'] = JWTConfig.REFRESH_TOKEN_EXPIRES
+    
+    # Инициализация JWT
+    jwt_manager.init_app(app)
     
     # Создаем папки для загрузок
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -111,7 +130,7 @@ def create_app():
                 return {}
     
     def token_required(f):
-        """Декоратор для проверки токена"""
+        """Декоратор для проверки JWT токена"""
         @wraps(f)
         def decorated(*args, **kwargs):
             token = None
@@ -123,11 +142,27 @@ def create_app():
             if not token:
                 return jsonify({'success': False, 'error': 'Токен отсутствует'}), 401
             
-            account = db_manager.get_account_by_id(token)
-            if not account:
+            try:
+                payload = jwt_manager.decode_token(token)
+                user_id = payload.get('sub')
+                
+                if not user_id:
+                    return jsonify({'success': False, 'error': 'Неверный токен'}), 401
+                
+                account = db_manager.get_account_by_id(user_id)
+                if not account:
+                    return jsonify({'success': False, 'error': 'Пользователь не найден'}), 401
+                
+                # Проверяем, что токен не был отозван (опционально)
+                if payload.get('type') != 'access':
+                    return jsonify({'success': False, 'error': 'Неверный тип токена'}), 401
+                
+                return f(account, *args, **kwargs)
+                
+            except ValueError as e:
+                return jsonify({'success': False, 'error': str(e)}), 401
+            except Exception as e:
                 return jsonify({'success': False, 'error': 'Неверный токен'}), 401
-            
-            return f(account, *args, **kwargs)
         
         return decorated
     
@@ -176,13 +211,23 @@ def create_app():
                 password=data['password']
             )
             
+            # Создаем токены
+            access_token = jwt_manager.create_access_token(account.id)
+            refresh_token = jwt_manager.create_refresh_token(account.id)
+            
             account_data = account.to_dict()
-            account_data['token'] = account.id
             
             return jsonify({
                 'success': True,
                 'message': 'Регистрация успешна',
-                'data': account_data
+                'data': {
+                    'user': account_data,
+                    'tokens': {
+                        'access_token': access_token,
+                        'refresh_token': refresh_token,
+                        'token_type': 'Bearer'
+                    }
+                }
             }), 201
             
         except ValueError as e:
@@ -204,13 +249,24 @@ def create_app():
         )
         
         if account:
+            # Создаем токены
+            access_token = jwt_manager.create_access_token(account.id)
+            refresh_token = jwt_manager.create_refresh_token(account.id)
+            
             account_data = account.to_dict()
-            account_data['token'] = account.id
             
             return jsonify({
                 'success': True,
                 'message': 'Вход выполнен',
-                'data': account_data
+                'data': {
+                    'user': account_data,
+                    'tokens': {
+                        'access_token': access_token,
+                        'refresh_token': refresh_token,
+                        'token_type': 'Bearer',
+                        'expires_in': JWTConfig.ACCESS_TOKEN_EXPIRES
+                    }
+                }
             })
         else:
             return jsonify({'success': False, 'error': 'Неверные учетные данные'}), 401
@@ -223,6 +279,34 @@ def create_app():
             'success': True,
             'data': current_account.to_dict_with_products()
         })
+    
+    # Обновление токена
+    @app.route('/api/auth/refresh', methods=['POST'])
+    def refresh_token():
+        data = get_json_data()
+        
+        if not data or 'refresh_token' not in data:
+            return jsonify({'success': False, 'error': 'Refresh token отсутствует'}), 400
+        
+        try:
+            new_access_token = jwt_manager.refresh_access_token(data['refresh_token'])
+            
+            if not new_access_token:
+                return jsonify({'success': False, 'error': 'Неверный refresh token'}), 401
+            
+            return jsonify({
+                'success': True,
+                'data': {
+                    'access_token': new_access_token,
+                    'token_type': 'Bearer',
+                    'expires_in': JWTConfig.ACCESS_TOKEN_EXPIRES
+                }
+            })
+            
+        except ValueError as e:
+            return jsonify({'success': False, 'error': str(e)}), 401
+        except Exception:
+            return jsonify({'success': False, 'error': 'Ошибка обновления токена'}), 500
     
     # 5. Список товаров (главная страница)
     @app.route('/api/products', methods=['GET'])
@@ -621,7 +705,6 @@ def create_app():
             product = db_manager.get_product(subscription.product_id)
             if product:
                 sub_data = subscription.to_dict()
-                # sub_data['product'] = product.to_dict_public() TODO должно быть реализовано в Subscription.to_dict
                 subscriptions_data.append(sub_data)
         
         return jsonify({

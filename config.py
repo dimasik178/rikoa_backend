@@ -1,9 +1,23 @@
+from dotenv import load_dotenv
+import os 
 # 🔧 КОНФИГУРАЦИЯ ПРОЕКТА "РЫНОК ТОВАРОВ С ИНВЕСТИЦИЯМИ"
+
+load_dotenv()
 
 # 🌱 НАСТРОЙКИ ЗАПОЛНЕНИЯ БАЗЫ ДАННЫХ (для seed.py)
 NUM_USERS = 15                    # Количество пользователей для сидинга
 NUM_PRODUCTS = 20                # Количество товаров для сидинга
 PURCHASE_PERCENTAGE = 0.6        # Процент подписок для сидинга
+
+# 🔐 JWT НАСТРОЙКИ
+class JWTConfig:
+    """Конфигурация JWT токенов"""
+    SECRET_KEY = 'your-jwt-secret-key-change-in-production'  # Должно быть в .env
+    SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+    ALGORITHM = os.getenv("JWT_ALGORITHM")
+    ACCESS_TOKEN_EXPIRES = os.getenv("JWT_ACCESS_TOKEN_EXPIRES") # 1 час в секундах
+    REFRESH_TOKEN_EXPIRES = os.getenv("JWT_REFRESH_TOKEN_EXPIRES") # 30 дней в секундах
+    TOKEN_LOCATION = 'headers'  # 'cookies'
 
 # 💰 ЭКОНОМИЧЕСКАЯ СИСТЕМА
 class MarketConfig:
@@ -35,6 +49,7 @@ class ServerConfig:
     # FLASK НАСТРОЙКИ
     SECRET_KEY = 'your-secret-key-here-change-in-production'
     SQLALCHEMY_DATABASE_URI = 'sqlite:///market.db'
+    SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL")
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     
     # НАСТРОЙКИ ЗАГРУЗКИ ФАЙЛОВ
