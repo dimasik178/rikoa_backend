@@ -252,6 +252,18 @@ class DatabaseManager:
                     status='active'
                 ).all()
                 
+                if not active_subscriptions:
+                    portfolio = product.portfolio
+                    db.session.delete(product)
+                    db.session.commit()
+                    return {
+                        'success': True,
+                        'message': f'Товар снят с продажи. Получено: {portfolio} AC',
+                        'portfolio_transferred': portfolio,
+                        'subscriptions_cancelled': 0,
+                        'product_deleted': True,
+                    }
+
                 subscription_ids = [sub.id for sub in active_subscriptions]
 
                 for subscription in active_subscriptions:
@@ -267,7 +279,7 @@ class DatabaseManager:
                 return {
                     'success': True,
                     'message': f'Товар снят с продажи. Получено: {portfolio} AC',
-                    'portfolio_transferred': product.portfolio,
+                    'portfolio_transferred': portfolio,
                     'subscriptions_cancelled': len(active_subscriptions),
                     'subscription_ids_deleted': subscription_ids,
                     'product_status': 'burned_hidden'
@@ -284,7 +296,7 @@ class DatabaseManager:
                     product_id=product_id,
                 ).all()
 
-                if len(remaining_subs) == 0:
+                if not remaining_subs:
                     db.session.delete(product)
                     db.session.commit()
                     return {
@@ -293,12 +305,10 @@ class DatabaseManager:
                         'portfolio_transferred': 0,
                         'product_deleted': True
                     }
-                subscription_ids = [sub.id for sub in active_subscriptions]
                 db.session.commit()
                 return {
                     'success': True,
                     'message': 'Товар скрыт из профиля продавца',
-                    'subscription_ids_deleted': subscription_ids,
                     'portfolio_transferred': 0,
                     'product_deleted': False
                 }
