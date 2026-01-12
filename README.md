@@ -112,17 +112,6 @@ docker rm marketplace
 ├── marketplace_env/       # Виртуальное окружение (локально)
 ├── photo_examples/        # Примеры изображений
 └── uploads/thumbnails     # Загруженные изображения
-
-
-├── .env              # Файл с переменными окружения
-├── Dockerfile        # Конфигурация Docker
-├── requirements.txt  # Зависимости Python
-├── main.py          # Точка входа
-├── web_server.py    # Основной сервер
-├── models.py        # Модели базы данных
-├── database.py      # Работа с базой данных
-├── uploads/         # Загруженные изображения
-└── photo_examples/  # Примеры изображений
 ```
 
 ## 🔧 Устранение проблем
