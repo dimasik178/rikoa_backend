@@ -1,0 +1,31 @@
+# Виртуальные окружения
+marketplace_env/
+venv/
+env/
+.venv/
+
+# Кэш Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Операционные системы
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Базы данных
+*.db
+*.sqlite
+*.log
