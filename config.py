@@ -12,7 +12,6 @@ PURCHASE_PERCENTAGE = 0.6        # Процент подписок для сид
 # 🔐 JWT НАСТРОЙКИ
 class JWTConfig:
     """Конфигурация JWT токенов"""
-    SECRET_KEY = 'your-jwt-secret-key-change-in-production'  # Должно быть в .env
     SECRET_KEY = os.getenv("JWT_SECRET_KEY")
     ALGORITHM = os.getenv("JWT_ALGORITHM")
     ACCESS_TOKEN_EXPIRES = os.getenv("JWT_ACCESS_TOKEN_EXPIRES") # 1 час в секундах
