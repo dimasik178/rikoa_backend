@@ -332,7 +332,9 @@ def create_app():
             products_data = [product.to_dict_public() for product in pagination.items]
         else:
             # С токеном - определяем тип пользователя
-            account = db_manager.get_account_by_id(token)
+            payload = jwt_manager.decode_token(token)
+            user_id = payload.get('sub')
+            account = db_manager.get_account_by_id(user_id)
             if account:
                 for product in pagination.items:
                     if product.creator_id == account.id:
