@@ -7,55 +7,82 @@
 ### 1. Клонирование репозитория
 ```bash
 git clone https://github.com/dimasik178/rikoa_backend.git
-cd rikoa_backend-masterы
+cd rikoa_backend
 ```
 
 ### 2. Настройка окружения
 
 Создайте файл `.env` в корне проекта с содержанием:
 ```env
-FLASK_ENV=production
+# Database
 DATABASE_URL=sqlite:///market.db
-JWT_SECRET_KEY=ваш-секретный-ключ-для-jwt
+
+# Flask
+FLASK_ENV=production # development or production 
+
+# JWT
+JWT_SECRET_KEY=your-secret-key-blazorandreact-jwt
 JWT_ALGORITHM=HS256
 JWT_ACCESS_TOKEN_EXPIRES=3600
 JWT_REFRESH_TOKEN_EXPIRES=2592000
-SECRET_KEY=ваш-секретный-ключ-для-flask
+SECRET_KEY=your-secret-key-blazorandreact-flask
 ```
 
 ### 3. Сборка Docker образа
 ```bash
-docker build -t marketplace-app .
+sudo docker build -t school-art-market .
 ```
 
-### 4. Запуск контейнера
+## 🚀 Запуск контейнера
+
+### Вариант A: Простой запуск
 ```bash
-docker run -d \
+sudo docker run -d \
+  --name art-market \
   -p 5000:5000 \
-  --name marketplace \
-  marketplace-app
+  -v art-market-uploads:/app/uploads \
+  -v art-market-data:/app \
+  school-art-market
+```
+
+### Вариант B: С монтированием папки с фото
+```bash
+sudo docker run -d \
+  --name art-market \
+  -p 5000:5000 \
+  -v $(pwd)/photo_examples:/app/photo_examples \
+  -v art-market-uploads:/app/uploads \
+  -v art-market-data:/app \
+  school-art-market
+```
+
+### Вариант C: С пробросом `.env` файла
+```bash
+sudo docker run -d \
+  --name art-market \
+  -p 5000:5000 \
+  -v $(pwd)/.env:/app/.env \
+  -v $(pwd)/photo_examples:/app/photo_examples \
+  -v art-market-uploads:/app/uploads \
+  school-art-market
 ```
 
 ### 5. Проверка работы
 Откройте в браузере: `http://localhost:5000/api/health`
 
-Должен появиться ответ:
-```json
-{"success": true, "status": "healthy"}
+Или выполните:
+```bash
+curl http://localhost:5000/api/health
 ```
 
-## 🚀 Запуск с сохранением данных
-
-Для сохранения загруженных изображений и базы данных между перезапусками:
-
-```bash
-docker run -d \
-  -p 5000:5000 \
-  -v ./uploads:/app/uploads \
-  -v ./photo_examples:/app/photo_examples \
-  -v ./market.db:/app/market.db \
-  --name marketplace \
-  marketplace-app
+Должен появиться ответ:
+```json
+{
+  "status": "healthy",
+  "success": true,
+  "timestamp": "2026-01-14T17:15:35.367234+00:00",
+  "version": "2.0"
+}
 ```
 
 ## 📚 Основные API эндпоинты
@@ -71,22 +98,22 @@ docker run -d \
 
 ### Просмотр логов
 ```bash
-docker logs marketplace
+sudo docker logs art-market
 ```
 
 ### Остановка контейнера
 ```bash
-docker stop marketplace
+sudo docker stop art-market
 ```
 
 ### Запуск остановленного контейнера
 ```bash
-docker start marketplace
+sudo docker start art-market
 ```
 
 ### Удаление контейнера
 ```bash
-docker rm marketplace
+sudo docker rm art-market
 ```
 
 ## 📁 Структура проекта
@@ -97,21 +124,24 @@ docker rm marketplace
 ├── .gitignore             # Файлы, игнорируемые Git
 ├── Dockerfile             # Конфигурация Docker
 ├── README.md              # Документация проекта
+├── docs.md                # Детальная документация API
 ├── requirements.txt       # Зависимости Python
+├── supervisord.conf       # Конфигурация supervisord для запуска daily_updater.py и main.py
 ├── config.py              # Конфигурация приложения
 ├── daily_updater.py       # Ежедневное обновление цен
 ├── database.py            # Работа с базой данных
-├── docs.md                # Детальная документация API
 ├── jwt_manager.py         # Управление JWT токенами
 ├── main.py                # Точка входа
 ├── models.py              # Модели базы данных
-├── search_engine.py       # Поисковый движок
-├── seed.py                # Заполнение тестовыми данными
-├── web_server.py          # Основной сервер
+├── photo_examples         # Фото для заполнения базы данных
+│   ├──1-20.jpg            # Двадцать тестовых фото
+├── search_engine.py       # Поисковой движок 
+├── seed.py                # Заполнение бд тестовыми данными
+├── web_server.py          # Основной сервер - роуты Flask
 ├── instance/              # Папка для базы данных SQLite
 ├── marketplace_env/       # Виртуальное окружение (локально)
 ├── photo_examples/        # Примеры изображений
-└── uploads/thumbnails     # Загруженные изображения
+└── uploads/thumbnails     # Загруженные изображения пользователей
 ```
 
 ## 🔧 Устранение проблем
@@ -119,14 +149,14 @@ docker rm marketplace
 ### 1. Порт уже занят
 Измените порт в команде запуска:
 ```bash
-docker run -d -p 8080:5000 --name marketplace marketplace-app
+sudo docker run -d -p 8080:5000 --name art-market school-art-market
 ```
 
 ### 2. Ошибка базы данных
 Удалите старую базу и перезапустите:
 ```bash
 rm market.db
-docker restart marketplace
+sudo docker restart art-market
 ```
 
 ### 3. Проблемы с изображениями
@@ -138,11 +168,41 @@ chmod -R 755 uploads photo_examples
 ## 📞 Поддержка
 
 При возникновении проблем:
-1. Проверьте логи: `docker logs marketplace`
+1. Проверьте логи: `sudo docker logs art-market`
 2. Убедитесь, что порт 5000 свободен
 3. Проверьте наличие файла `.env`
-4. Пересоберите образ: `docker build -t marketplace-app .`
+4. Пересоберите образ: `sudo docker build -t school-art-market .`
 
 ---
 
 **Готово!** Сервер запущен на http://localhost:5000 🚀
+
+
+**Полезные команды:**
+```bash
+# Посмотреть логи
+sudo docker logs art-market
+# Заполнить бд тестовыми данными
+sudo docker exec art-market python seed.py
+# Обновить цены на платформе, не дожидаясь следующего дня
+sudo docker exec art-market python daily_updater.py --run-now
+# Войти в контейнер
+sudo docker exec -it art-market /bin/bash
+# Узнать время в контейнере
+sudo docker exec art-market date
+
+# Посмотреть запущенные контейнеры
+sudo docker ps
+# Посмотреть все контейнеры, включая остановленные
+sudo docker ps -a 
+# Остановить контейнер
+sudo docker stop art-market
+# Запустить контейнер
+sudo docker start art-market
+# Перезапустить
+sudo docker restart art-market
+# Удалить контейнер
+sudo docker rm -f art-market
+# Удалить образ
+sudo docker rmi school-art-market
+```
