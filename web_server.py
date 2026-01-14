@@ -388,8 +388,9 @@ def create_app():
             # Скрытый товар - показываем только подписчикам
             if not token:
                 return jsonify({'success': False, 'error': 'Товар не найден'}), 404
-            
-            account = db_manager.get_account_by_id(token)
+            payload = jwt_manager.decode_token(token)
+            user_id = payload.get('sub')
+            account = db_manager.get_account_by_id(user_id)
             if not account:
                 return jsonify({'success': False, 'error': 'Товар не найден'}), 404
             
@@ -405,7 +406,9 @@ def create_app():
         elif product.status == 'burned':
             # Прогоревший товар - показываем продавцу и подписчикам
             if token:
-                account = db_manager.get_account_by_id(token)
+                payload = jwt_manager.decode_token(token)
+                user_id = payload.get('sub')
+                account = db_manager.get_account_by_id(user_id)
                 if account:
                     is_seller = product.creator_id == account.id
                     has_subscription = Subscription.query.filter_by(
