@@ -1,6 +1,12 @@
 from web_server import create_app
 import os
 from dotenv import load_dotenv
+import signal
+import sys
+
+def shutdown_handler(signum, frame):
+    print(f"Получен сигнал {signum}, завершаем работу...")
+    sys.exit(0)
 
 def main():
     app = create_app()
@@ -21,6 +27,10 @@ def main():
     print("   GET  /api/products/<id> - Product details")
     
     return app
+
+# Регистрируем обработчики
+signal.signal(signal.SIGTERM, shutdown_handler)
+signal.signal(signal.SIGINT, shutdown_handler)
 
 if __name__ == "__main__":
     load_dotenv()  # Загружаем переменные из .env
