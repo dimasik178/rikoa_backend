@@ -6,7 +6,7 @@ from datetime import timezone, datetime
 import uuid
 from PIL import Image
 from functools import wraps
-from config import ServerConfig, ApiConfig, MarketConfig, JWTConfig
+from config import ServerConfig, ApiConfig, MarketConfig, JWTConfig, MARKET_VERSION
 from search_engine import search_engine
 from models import Product, Subscription
 from jwt_manager import jwt_manager
@@ -193,7 +193,7 @@ def create_app():
             'success': True,
             'status': 'healthy',
             'timestamp': datetime.now(timezone.utc).isoformat(),
-            'version': '2.0'
+            'version': MARKET_VERSION
         })
     
     # 2. Регистрация
