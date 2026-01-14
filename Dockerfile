@@ -29,9 +29,6 @@ RUN mkdir -p uploads uploads/thumbnails photo_examples instance \
 # Настройка Supervisord
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-# Делаем скрипт запуска исполняемым
-RUN chmod +x /app/run.sh
-
 # Открываем порт
 EXPOSE 5000
 
