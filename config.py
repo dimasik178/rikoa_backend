@@ -3,7 +3,7 @@ import os
 # 🔧 КОНФИГУРАЦИЯ ПРОЕКТА "РЫНОК ТОВАРОВ С ИНВЕСТИЦИЯМИ"
 
 load_dotenv()
-MARKET_VERSION = "2.0" # Версия проекта, возвращается на /api/health
+MARKET_VERSION = "2.1" # Версия проекта, возвращается на /api/health
 
 # 🌱 НАСТРОЙКИ ЗАПОЛНЕНИЯ БАЗЫ ДАННЫХ (для seed.py)
 NUM_USERS = 15                    # Количество пользователей для сидинга
@@ -25,6 +25,7 @@ class MarketConfig:
     
     # БАЛАНС И ЦЕНЫ
     STARTING_BALANCE = 100           # Начальный баланс пользователя
+    BANKRUPTCY_RESET_BALANCE = 100   # Баланс после банкротства
     MIN_PRODUCT_PRICE = 1            # Минимальная цена товара
     MAX_PRODUCT_PRICE = 10000        # Максимальная цена товара
     

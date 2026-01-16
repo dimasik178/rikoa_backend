@@ -22,19 +22,30 @@ class Account(db.Model):
     # 💰 ТОЛЬКО БАЛАНС
     balance = db.Column(db.Integer, default=MarketConfig.STARTING_BALANCE)
     
+    # 🏦 БАНКРОТСТВО
+    bankruptcy_count = db.Column(db.Integer, default=0)  # Счетчик банкротств
+    last_bankruptcy = db.Column(db.DateTime, nullable=True)  # Дата последнего банкротства
+    can_declare_bankruptcy = db.Column(db.Boolean, default=True)  # Может ли объявить банкротство
+
     # Relationships
     products = relationship("Product", back_populates="creator")
     subscriptions = relationship("Subscription", back_populates="subscriber")
     
     def to_dict(self):
         """Базовая информация об аккаунте"""
-        return {
+        result = {
             'id': self.id,
             'nickname': self.nickname,
             'mail': self.mail,
             'createdAt': self.created_at.isoformat(),
             'balance': self.balance,
+            'can_declare_bankruptcy': self.can_declare_bankruptcy,
+            'bankruptcy_count': self.bankruptcy_count,
         }
+        # Добавляем информацию о банкротстве если есть
+        if self.bankruptcy_count > 0:
+            result['last_bankruptcy'] = self.last_bankruptcy.isoformat()
+        return result
     
     def to_dict_with_products(self):
         """Информация с товарами и подписками"""

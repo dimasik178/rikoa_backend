@@ -717,4 +717,17 @@ def create_app():
             'data': subscriptions_data
         })
     
+    # 16. Объявление банкротства
+    @app.route('/api/account/bankruptcy', methods=['POST'])
+    @token_required
+    def declare_bankruptcy(current_account):
+        try:
+            result = db_manager.declare_bankruptcy(current_account.id)
+            return jsonify(result)
+            
+        except ValueError as e:
+            return jsonify({'success': False, 'error': str(e)}), 400
+        except Exception as e:
+            return jsonify({'success': False, 'error': 'Ошибка объявления банкротства'}), 500
+    
     return app

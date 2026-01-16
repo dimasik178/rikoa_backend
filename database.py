@@ -4,7 +4,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy import desc, and_
 from werkzeug.security import generate_password_hash, check_password_hash
 from config import MarketConfig
-import json
+from datetime import datetime
 
 class TransactionManager:
     """Управление транзакциями и блокировками"""
@@ -19,6 +19,85 @@ class TransactionManager:
         except SQLAlchemyError as e:
             db.session.rollback()
             raise Exception(f"Transaction failed: {str(e)}")
+        except Exception as e:
+            db.session.rollback()
+            raise e
+
+class BankruptcyManager:
+    """Управление банкротством"""
+
+    @staticmethod
+    def check_bankruptcy_conditions(account: Account) -> tuple[bool, str]:
+        """Проверяет условия для объявления банкротства"""
+        
+        # 1. Проверяем флаг cooldown
+        if not account.can_declare_bankruptcy:
+            return False, "Банкротство можно объявлять только 1 раз до следующего обновления цен."
+        
+        # 2. Проверяем баланс (должен быть меньше BANKRUPTCY_RESET_BALANCE)
+        if account.balance >= MarketConfig.BANKRUPTCY_RESET_BALANCE:
+            return False, f"Нельзя объявить банкротство при балансе ≥ {MarketConfig.BANKRUPTCY_RESET_BALANCE} AC"
+        
+        # 3. Проверяем активные товары
+        active_products = [p for p in account.products if p.status == 'active']
+        if active_products:
+            return False, "Нельзя объявить банкротство с активными товарами. Cначала снимите товары с продажи."
+        
+        # 4. Проверяем активные подписки
+        active_subscriptions = [s for s in account.subscriptions if s.status == 'active']
+        if active_subscriptions:
+            return False, "Нельзя объявить банкротство с активными подписками. Cначала отпишитесь от товаров."
+        
+        return True, ""
+
+    @staticmethod
+    def declare_bankruptcy(account: Account) -> dict:
+        """Объявляет банкротство пользователя"""
+        
+        # Проверяем условия
+        can_declare, message = BankruptcyManager.check_bankruptcy_conditions(account)
+        if not can_declare:
+            raise ValueError(message)
+        
+        try:
+            old_balance = account.balance
+            
+            # Устанавливаем новый баланс
+            account.balance = MarketConfig.BANKRUPTCY_RESET_BALANCE
+            
+            # Увеличиваем счетчик банкротств
+            account.bankruptcy_count += 1
+            
+            # Обновляем дату последнего банкротства
+            account.last_bankruptcy = datetime.utcnow()
+            
+            # Запрещаем повторное банкротство до следующего обновления цен
+            account.can_declare_bankruptcy = False
+            
+            db.session.commit()
+            
+            return {
+                'success': True,
+                'message': f'💸 Банкротство объявлено! Баланс изменён: {old_balance} → {account.balance} AC',
+                'old_balance': old_balance,
+                'new_balance': account.balance,
+                'bankruptcy_count': account.bankruptcy_count,
+                'last_bankruptcy': account.last_bankruptcy.isoformat(),
+                'can_declare_bankruptcy': account.can_declare_bankruptcy
+            }
+            
+        except Exception as e:
+            db.session.rollback()
+            raise ValueError(f"Ошибка при объявлении банкротства: {str(e)}")
+    
+    @staticmethod
+    def reset_bankruptcy_cooldown_for_all():
+        """Сбрасывает cooldown банкротства для всех пользователей (вызывается при обновлении цен)"""
+        try:
+            # Устанавливаем can_declare_bankruptcy = True для всех пользователей
+            Account.query.update({Account.can_declare_bankruptcy: True})
+            db.session.commit()
+            return True
         except Exception as e:
             db.session.rollback()
             raise e
@@ -141,6 +220,16 @@ class DatabaseManager:
     def get_account_by_nickname(self, nickname: str) -> Account:
         """Получает аккаунт по никнейму"""
         return Account.query.filter_by(nickname=nickname).first()
+    
+    # ========== БАНКРОТСТВО ==========
+    
+    def declare_bankruptcy(self, account_id: str) -> dict:
+        """Объявляет банкротство для пользователя"""
+        account = self.get_account_by_id(account_id)
+        if not account:
+            raise ValueError("Пользователь не найден")
+        
+        return BankruptcyManager.declare_bankruptcy(account)
     
     # ========== ТОВАРЫ ==========
     
