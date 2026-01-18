@@ -8,7 +8,6 @@ import schedule
 import time
 from daily_updater import update_daily_prices
 from config import MarketConfig
-from config import MarketConfig
 PRICE_UPDATE_TIME = MarketConfig.PRICE_UPDATE_TIME
 
 
@@ -57,9 +56,12 @@ def main():
     app = create_app()
     
     # Теперь запускаем планировщик (после инициализации БД)
-    global scheduler_thread
-    scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
-    scheduler_thread.start()
+    if not os.environ.get('WERKZEUG_RUN_MAIN'): # Основной процесс
+        global scheduler_thread
+        scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
+        scheduler_thread.start()
+    else: # Избегаем дублирование запусков обновлений цен на рынке
+        print("🔄 Reloader process detected, scheduler not started")
     
     print("🚀 Market API Server starting...")
     print("📊 Database initialized")
