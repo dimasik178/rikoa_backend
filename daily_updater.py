@@ -1,6 +1,4 @@
-import schedule
 from datetime import datetime
-import time
 import logging
 import os
 from web_server import create_app
@@ -15,7 +13,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def update_daily_prices():
-    """Обновляет цены товаров в 0:00 (МСК)"""
+    """Обновляет цены товаров и збрасывает cooldown банкротств"""
     logger.info("🔄 Начало ежедневного обновления цен...")
     
     # Создаем приложение вручную, без контекста запроса
@@ -48,38 +46,10 @@ def update_daily_prices():
             logger.error(f"❌ Ошибка обновления: {e}")
             raise
 
-def run_scheduler():
-    """Запускает планировщик задач"""
-    logger.info("⏰ Планировщик ежедневного обновления запущен")
-    
-    # Время обновления в контейнере
-    # После установки TZ=Europe/Moscow можно использовать 00:00
-    schedule.every().day.at("00:00").do(update_daily_prices)
-    
-    current_time = datetime.now().strftime("%H:%M:%S")
-    logger.info(f"Текущее время в контейнере: {current_time}")
-    logger.info("Следующее обновление в 00:00 (Москва)")
-    
-    # Первая проверка через 5 секунд после запуска
-    time.sleep(5)
-    logger.info("Планировщик начал работу...")
-    
-    while True:
-        try:
-            schedule.run_pending()
-            time.sleep(60)  # Проверяем каждую минуту
-        except KeyboardInterrupt:
-            logger.info("Планировщик остановлен")
-            break
-        except Exception as e:
-            logger.error(f"Ошибка в планировщике: {e}")
-            time.sleep(60)
-
 if __name__ == "__main__":
     # Если переданы аргументы командной строки
     if len(os.sys.argv) > 1 and os.sys.argv[1] == "--run-now":
         # Запускаем обновление немедленно
         update_daily_prices()
     else:
-        # Запускаем планировщик
-        run_scheduler()
+        print('Доступен запуск только с параметром "--run-now", для немедленного обновления цен на платформе')

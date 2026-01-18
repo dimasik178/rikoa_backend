@@ -34,7 +34,7 @@ class MarketConfig:
     MAX_ACTIVE_PRODUCTS_PER_SELLER = 8  # Максимально активных товаров у продавца
     
     # ВРЕМЕННЫЕ НАСТРОЙКИ
-    PRICE_UPDATE_HOUR = 0            # 0:00 - время обновления цен
+    PRICE_UPDATE_TIME = "00:00"            # 0:00 - время обновления цен
     PRICE_HISTORY_DAYS = 6           # Дней в графике цены (6 чисел)
     
     # ВАЛИДАЦИЯ

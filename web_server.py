@@ -559,7 +559,7 @@ def create_app():
             
             return jsonify({
                 'success': True,
-                'message': f'Цена изменена. Новая цена установится в {MarketConfig.PRICE_UPDATE_HOUR}:00',
+                'message': f'Цена изменена. Новая цена установится в {MarketConfig.PRICE_UPDATE_HOUR}',
                 'data': product.to_dict_for_creator()
             })
             
