@@ -126,7 +126,6 @@ sudo docker rm art-market
 ├── README.md              # Документация проекта
 ├── docs.md                # Детальная документация API
 ├── requirements.txt       # Зависимости Python
-├── supervisord.conf       # Конфигурация supervisord для запуска daily_updater.py и main.py
 ├── config.py              # Конфигурация приложения
 ├── daily_updater.py       # Ежедневное обновление цен
 ├── database.py            # Работа с базой данных
