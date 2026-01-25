@@ -1,5 +1,6 @@
 from datetime import datetime
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import desc
 from sqlalchemy.orm import relationship
 import uuid
 import json
@@ -65,6 +66,13 @@ class Account(db.Model):
         ]
         
         return data
+
+    @staticmethod
+    def get_rating_paginated(page: int = 1, per_page: int = 20):
+        """Получает рейтинг игроков по балансу с пагинацией"""
+        return Account.query.order_by(
+            desc(Account.balance)
+        ).paginate(page=page, per_page=per_page, error_out=False)
 
 class Product(db.Model):
     __tablename__ = 'products'

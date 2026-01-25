@@ -569,6 +569,34 @@ class DatabaseManager:
             status='active'
         ).order_by(desc(Subscription.id)).all()
     
+    # ========== РЕЙТИНГ ИГРОКОВ ==========
+    
+    def get_player_rating_paginated(self, page: int = 1, per_page: int = 20):
+        """Получает рейтинг игроков по балансу с пагинацией"""
+        pagination = Account.get_rating_paginated(page=page, per_page=per_page)
+        
+        players_data = []
+        for account in pagination.items:
+            # Форматируем данные для рейтинга
+            player_data = {
+                'id': account.id,
+                'nickname': account.nickname,
+                'balance': account.balance,
+                'bankruptcy_count': account.bankruptcy_count,
+                'created_at': account.created_at.isoformat()
+            }
+            players_data.append(player_data)
+        
+        return {
+            'players': players_data,
+            'pagination': {
+                'page': page,
+                'per_page': per_page,
+                'total': pagination.total,
+                'pages': pagination.pages
+            }
+        }
+
     # ========== ПОИСК ==========
     
     def get_all_active_products(self):

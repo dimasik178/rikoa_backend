@@ -730,4 +730,32 @@ def create_app():
         except Exception as e:
             return jsonify({'success': False, 'error': 'Ошибка объявления банкротства'}), 500
     
+    @app.route('/api/players/rating', methods=['GET'])
+    def get_player_rating():
+        """Получает рейтинг игроков по балансу (сортировка по убыванию)"""
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', ApiConfig.PLAYERS_PER_PAGE, type=int)
+        
+        # Валидация параметров
+        if per_page < ApiConfig.MIN_PLAYERS_PER_PAGE or per_page > ApiConfig.MAX_PLAYERS_PER_PAGE:
+            return jsonify({
+                'success': False,
+                'error': f'Количество игроков на странице должно быть от {ApiConfig.MIN_PLAYERS_PER_PAGE} до {ApiConfig.MAX_PLAYERS_PER_PAGE}'
+            }), 400        
+        
+        try:
+            rating_data = db_manager.get_player_rating_paginated(page=page, per_page=per_page)
+            
+            return jsonify({
+                'success': True,
+                'data': {
+                    'players': rating_data['players'],
+                    'pagination': rating_data['pagination']
+                }
+            })
+            
+        except Exception as e:
+            app.logger.error(f"Error getting player rating: {str(e)}")
+            return jsonify({'success': False, 'error': 'Ошибка получения рейтинга игроков'}), 500
+
     return app
