@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify, send_file
+from flask_cors import CORS
 from database import db_manager
 import os
 import datetime
@@ -17,6 +18,18 @@ def create_app():
     
     app = Flask(__name__)
     
+    # Инициализация CORS
+    CORS(app, resources={
+        r"/api/*": {
+            "origins": "*",  # Разрешаем все источники
+            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization"],
+            "expose_headers": ["Content-Type", "Authorization"],
+            "supports_credentials": False,
+            "max_age": 600
+        }
+    })
+
     # Используем FLASK_ENV для конфигурации
     if os.getenv('FLASK_ENV') == 'development':
         app.config['DEBUG'] = True
@@ -50,14 +63,6 @@ def create_app():
     
     # Инициализация базы данных
     db_manager.init_app(app)
-    
-    # CORS заголовки
-    @app.after_request
-    def after_request(response):
-        response.headers.add('Access-Control-Allow-Origin', '*')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-        response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
-        return response
     
     # ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
     
