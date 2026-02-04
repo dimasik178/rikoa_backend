@@ -39,12 +39,12 @@ class BankruptcyManager:
             return False, f"Нельзя объявить банкротство при балансе ≥ {MarketConfig.BANKRUPTCY_RESET_BALANCE} AC"
         
         # 3. Проверяем активные товары
-        active_products = [p for p in account.products if p.status == 'active']
+        active_products = [p for p in account.products if p.is_active]
         if active_products:
             return False, "Нельзя объявить банкротство с активными товарами. Cначала снимите товары с продажи."
         
         # 4. Проверяем активные подписки
-        active_subscriptions = [s for s in account.subscriptions if s.status == 'active']
+        active_subscriptions = [s for s in account.subscriptions if s.is_active]
         if active_subscriptions:
             return False, "Нельзя объявить банкротство с активными подписками. Cначала отпишитесь от товаров."
         
@@ -77,7 +77,6 @@ class BankruptcyManager:
             db.session.commit()
             
             return {
-                'success': True,
                 'message': f'💸 Банкротство объявлено! Баланс изменён: {old_balance} → {account.balance} AC',
                 'old_balance': old_balance,
                 'new_balance': account.balance,
@@ -129,7 +128,7 @@ class ProductManager:
         """Проверяет лимит активных товаров продавца"""
         active_count = Product.query.filter_by(
             creator_id=account_id, 
-            status='active'
+            is_active=True
         ).count()
         
         if active_count >= MarketConfig.MAX_ACTIVE_PRODUCTS_PER_SELLER:
@@ -143,11 +142,11 @@ class SubscriptionManager:
     @staticmethod
     def subscribe_user(account_id, product_id, current_price):
         """Оформляет подписку пользователя на товар"""
-        # Проверяем существующую подписку
+        # Проверяем существующую активную подписку
         existing = Subscription.query.filter_by(
             subscriber_id=account_id,
             product_id=product_id,
-            status='active'
+            is_active=True
         ).first()
         
         if existing:
@@ -158,7 +157,7 @@ class SubscriptionManager:
             subscriber_id=account_id,
             product_id=product_id,
             subscription_price=current_price,
-            status='active'
+            is_active=True
         )
         
         db.session.add(subscription)
@@ -176,8 +175,8 @@ class SubscriptionManager:
             payout_amount = current_price
             is_burned = False
         
-        # Обновляем подписку
-        subscription.status = 'cancelled'
+        # Деактивируем подписку
+        subscription.is_active = False
         
         return payout_amount, is_burned
 
@@ -264,7 +263,7 @@ class DatabaseManager:
             photo_url=photo_url,
             startup_capital=startup_capital,
             portfolio=startup_capital,  # Начальный портфель = стартовый капитал
-            status='active'
+            is_active=True
         )
         
         # Списываем стартовый капитал с баланса продавца
@@ -279,17 +278,17 @@ class DatabaseManager:
         """Получает товар по ID"""
         return Product.query.get(product_id)
     
-    def get_products_paginated(self, page: int = 1, per_page: int = 14):
-        """Получает товары с пагинацией (только активные)"""
-        return Product.query.filter_by(status='active').order_by(
+    def get_products_paginated(self, page: int = 1, per_page: int = 14, is_active: bool = True):
+        """Получает товары с пагинацией с фильтрацией по is_active"""
+        return Product.query.filter_by(is_active=is_active).order_by(
             desc(Product.created_at)
         ).paginate(page=page, per_page=per_page, error_out=False)
     
-    def get_user_products(self, account_id: str):
-        """Получает товары пользователя (active и burned, но не burned_hidden)"""
-        return Product.query.filter_by(creator_id=account_id).filter(
-            Product.status.in_(['active', 'burned'])
-        ).order_by(desc(Product.created_at)).all()
+    def get_user_products(self, account_id: str, is_active: bool = True):
+        """Получает товары пользователя с фильтрацией по is_active"""
+        return Product.query.filter_by(creator_id=account_id, is_active=is_active).order_by(
+            desc(Product.created_at)
+        ).all()
     
     def update_product_price(self, product_id: str, seller_id: str, new_price: int) -> Product:
         """Изменяет цену товара (устанавливает на следующий день)"""
@@ -306,7 +305,7 @@ class DatabaseManager:
             raise ValueError("Только владелец может изменять цену товара")
         
         # Проверяем, что товар активен
-        if product.status != 'active':
+        if not product.is_active:
             raise ValueError("Нельзя изменить цену неактивного товара")
         
         # Проверяем, что новая цена не превышает портфель
@@ -320,7 +319,7 @@ class DatabaseManager:
         return product
     
     def remove_product(self, product_id: str, seller_id: str):
-        """Снимает товар с продажи или скрывает прогоревший товар"""
+        """Снимает товар с продажи или скрывает неактивный товар"""
         product = self.get_product(product_id)
         if not product:
             raise ValueError("Товар не найден")
@@ -331,14 +330,14 @@ class DatabaseManager:
         seller = self.get_account_by_id(seller_id)
         try:
             # СЛУЧАЙ 1: Активный товар
-            if product.status == 'active':
+            if product.is_active:
                 # 1. Продавец забирает ВЕСЬ портфель
                 seller.balance += product.portfolio
                 
-                # 2. Все активные подписки становятся 'cancelled'
+                # 2. Все активные подписки становятся неактивными
                 active_subscriptions = Subscription.query.filter_by(
                     product_id=product_id,
-                    status='active'
+                    is_active=True
                 ).all()
                 
                 if not active_subscriptions:
@@ -346,7 +345,6 @@ class DatabaseManager:
                     db.session.delete(product)
                     db.session.commit()
                     return {
-                        'success': True,
                         'message': f'Товар снят с продажи. Получено: {portfolio} AC',
                         'portfolio_transferred': portfolio,
                         'subscriptions_cancelled': 0,
@@ -356,63 +354,46 @@ class DatabaseManager:
                 subscription_ids = [sub.id for sub in active_subscriptions]
 
                 for subscription in active_subscriptions:
-                    subscription.status = 'cancelled'
+                    subscription.is_active = False
 
-                # 3. Товар становится burned_hidden
-                product.status = 'burned_hidden'
+                # 3. Товар становится неактивным
+                product.is_active = False
                 portfolio = product.portfolio
                 product.portfolio = 0
                 
                 db.session.commit()
                 
                 return {
-                    'success': True,
                     'message': f'Товар снят с продажи. Получено: {portfolio} AC',
                     'portfolio_transferred': portfolio,
                     'subscriptions_cancelled': len(active_subscriptions),
                     'subscription_ids_deleted': subscription_ids,
-                    'product_status': 'burned_hidden'
+                    'product_is_active': False
                 }
 
-            # СЛУЧАЙ 2: Прогоревший товар (burned)
-            elif product.status == 'burned':
-                # 1. Просто меняем статус на burned_hidden
-                product.status = 'burned_hidden'
-                
-                # 2. Проверяем, нужно ли удалять товар полностью
-                # (если нет подписчиков)
+            # СЛУЧАЙ 2: Неактивный товар
+            elif not product.is_active:
+                # Проверяем, нужно ли удалять товар полностью
+                # (если нет активных подписок)
                 remaining_subs = Subscription.query.filter_by(
                     product_id=product_id,
+                    is_active=True
                 ).all()
 
                 if not remaining_subs:
                     db.session.delete(product)
                     db.session.commit()
                     return {
-                        'success': True,
-                        'message': 'Товар скрыт и удален (не осталось подписчиков)',
+                        'message': 'Товар удален (не осталось активных подписчиков)',
                         'portfolio_transferred': 0,
                         'product_deleted': True
                     }
-                db.session.commit()
+                
                 return {
-                    'success': True,
-                    'message': 'Товар скрыт из профиля продавца',
+                    'message': 'Товар уже неактивен',
                     'portfolio_transferred': 0,
                     'product_deleted': False
                 }
-            
-            # СЛУЧАЙ 3: Уже скрытый товар
-            elif product.status == 'burned_hidden':
-                return {
-                    'success': True,
-                    'message': 'Товар уже скрыт',
-                    'portfolio_transferred': 0,
-                    'product_deleted': False
-                }
-            
-            else:
-                raise ValueError(f"Неизвестный статус товара: {product.status}")
                 
         except Exception as e:
             db.session.rollback()
@@ -424,7 +405,7 @@ class DatabaseManager:
         """Подписка пользователя на товар"""
         # Получаем товар
         product = self.get_product(product_id)
-        if not product or product.status != 'active':
+        if not product or not product.is_active:
             raise ValueError("Товар не найден или неактивен")
         
         # Проверяем, что пользователь не продавец
@@ -448,7 +429,7 @@ class DatabaseManager:
             # Добавляем деньги в портфель товара
             product.portfolio += product.current_price
             product.subscriptions_money += product.current_price
-            product.active_subscriptions_count += 1
+            product.subscribers_count += 1
             
             # Создаем подписку
             subscription = SubscriptionManager.subscribe_user(
@@ -460,7 +441,6 @@ class DatabaseManager:
         subscription = TransactionManager.execute_transaction(transaction)
         
         return {
-            'success': True,
             'subscription': subscription.to_dict(),
             'message': f'Подписка оформлена за {product.current_price} AC'
         }
@@ -471,6 +451,7 @@ class DatabaseManager:
         subscription = Subscription.query.filter_by(
             subscriber_id=account_id,
             product_id=product_id,
+            is_active=True
         ).first()
         
         if not subscription:
@@ -479,8 +460,8 @@ class DatabaseManager:
         product : Product
         product = subscription.product
         
-        # СЛУЧАЙ 1: Товар active - обычная отписка с выплатой
-        if product.status == 'active':
+        # СЛУЧАЙ 1: Товар активен - обычная отписка с выплатой
+        if product.is_active:
             def transaction():
                 # Проверяем, хватит ли денег в портфеле
                 payout_amount = product.current_price
@@ -491,25 +472,25 @@ class DatabaseManager:
                     payout_amount = product.portfolio
                     is_burned = True
                     
-                    # Меняем статус ВСЕХ подписок этого товара на 'cancelled'
+                    # Деактивируем ВСЕ подписки этого товара
                     all_subscriptions = Subscription.query.filter_by(
                         product_id=product_id,
-                        status='active'
+                        is_active=True
                     ).all()
                     for sub in all_subscriptions:
-                        sub.status = 'cancelled'
+                        sub.is_active = False
                     
-                    # Меняем статус товара
-                    product.status = 'burned'
+                    # Деактивируем товар
+                    product.is_active = False
                     product.portfolio = 0
                     product.subscriptions_money -= payout_amount
-                    product.active_subscriptions_count -= 1
+                    product.subscribers_count -= 1
                 else:
-                    # Обычная отписка - удаляем подписку
-                    db.session.delete(subscription)
+                    # Обычная отписка - деактивируем подписку
+                    subscription.is_active = False
                     product.portfolio -= payout_amount
                     product.subscriptions_money -= payout_amount
-                    product.active_subscriptions_count -= 1
+                    product.subscribers_count -= 1
                 
                 # Выплачиваем пользователю
                 user = self.get_account_by_id(account_id)
@@ -518,13 +499,12 @@ class DatabaseManager:
                 return {
                     'payout_amount': payout_amount,
                     'is_burned': is_burned,
-                    'product_status': product.status
+                    'product_is_active': product.is_active
                 }
             
             result = TransactionManager.execute_transaction(transaction)
             
             response = {
-                'success': True,
                 'message': f'Отписка выполнена. Выплачено: {result["payout_amount"]} AC',
                 'payout_amount': result['payout_amount']
             }
@@ -534,39 +514,35 @@ class DatabaseManager:
             
             return response
         
-        # СЛУЧАЙ 2: Товар burned или burned_hidden - просто удаляем подписку
-        elif product.status in ['burned', 'burned_hidden']:
-            # Просто удаляем подписку (денег не возвращаем)
-            db.session.delete(subscription)
+        # СЛУЧАЙ 2: Товар неактивен - просто деактивируем подписку
+        elif not product.is_active:
+            # Просто деактивируем подписку (денег не возвращаем)
+            subscription.is_active = False
             
             # Проверяем, нужно ли удалять товар полностью
-            # (burned_hidden + нет подписчиков)
-            if product.status == 'burned_hidden':
-                remaining_subs = Subscription.query.filter_by(
-                    product_id=product_id
-                ).count()
-                
-                if remaining_subs == 0:
-                    # Полностью удаляем товар из БД
-                    db.session.delete(product)
+            # (если нет активных подписчиков)
+            remaining_subs = Subscription.query.filter_by(
+                product_id=product_id,
+                is_active=True
+            ).count()
+            
+            if remaining_subs == 0:
+                # Полностью удаляем товар из БД
+                db.session.delete(product)
             
             db.session.commit()
             
             return {
-                'success': True,
-                'message': 'Отписка от прогоревшего товара выполнена',
+                'message': 'Отписка от неактивного товара выполнена',
                 'payout_amount': 0,
-                'product_deleted': product.status == 'burned_hidden' and not Subscription.query.filter_by(product_id=product_id).first()
+                'product_deleted': not Product.query.get(product_id)
             }
-        
-        else:
-            raise ValueError(f"Неизвестный статус товара: {product.status}")
     
-    def get_user_subscriptions(self, account_id: str):
-        """Получает подписки пользователя"""
+    def get_user_subscriptions(self, account_id: str, is_active: bool = True):
+        """Получает подписки пользователя с фильтрацией по is_active"""
         return Subscription.query.filter_by(
             subscriber_id=account_id,
-            status='active'
+            is_active=is_active
         ).order_by(desc(Subscription.id)).all()
     
     # ========== РЕЙТИНГ ИГРОКОВ ==========
@@ -599,9 +575,9 @@ class DatabaseManager:
 
     # ========== ПОИСК ==========
     
-    def get_all_active_products(self):
-        """Получает все активные товары"""
-        return Product.query.filter_by(status='active').all()
+    def get_all_products(self, is_active: bool = True):
+        """Получает все товары с фильтрацией по is_active"""
+        return Product.query.filter_by(is_active=is_active).all()
     
     def get_product_by_photo_url(self, file_id: str) -> Product:
         """Получает товар по photo_url (file_id)"""
@@ -610,8 +586,8 @@ class DatabaseManager:
     # ========== СИСТЕМНЫЕ ==========
     
     def get_daily_update_products(self):
-        """Получает товары для ежедневного обновления"""
-        return Product.query.filter_by(status='active').all()
+        """Получает активные товары для ежедневного обновления"""
+        return Product.query.filter_by(is_active=True).all()
     
     def update_product_price_history(self, product: Product):
         """Обновляет историю цен товара (для ежедневного обновления)"""

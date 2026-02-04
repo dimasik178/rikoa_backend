@@ -101,7 +101,7 @@ class ProductSearchEngine:
         return " ".join(filter(None, fields))
     
     def search(self, products: List[Product], search_term: str, 
-               max_results: int = 20) -> List[Tuple[Product, float]]:
+               max_results: int = SearchConfig.MAX_VALUES["results_limit"]) -> List[Tuple[Product, float]]:
         """
         Выполняет интеллектуальный поиск с триграммами
         

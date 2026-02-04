@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import desc
 from sqlalchemy.orm import relationship
@@ -11,6 +11,10 @@ db = SQLAlchemy()
 def generate_uuid():
     return str(uuid.uuid4())
 
+def utc_now():
+    """Возвращает UTC datetime без информации о часовом поясе, как это делал utcnow()"""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
 class Account(db.Model):
     __tablename__ = 'accounts'
     
@@ -18,7 +22,7 @@ class Account(db.Model):
     nickname = db.Column(db.String(80), unique=True, nullable=False)
     mail = db.Column(db.String(120), unique=True, nullable=False)
     password = db.Column(db.String(120), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=utc_now)
     
     # 💰 ТОЛЬКО БАЛАНС
     balance = db.Column(db.Integer, default=MarketConfig.STARTING_BALANCE)
@@ -38,7 +42,7 @@ class Account(db.Model):
             'id': self.id,
             'nickname': self.nickname,
             'mail': self.mail,
-            'createdAt': self.created_at.isoformat(),
+            'created_at': self.created_at.isoformat(),
             'balance': self.balance,
             'can_declare_bankruptcy': self.can_declare_bankruptcy,
             'bankruptcy_count': self.bankruptcy_count,
@@ -48,21 +52,22 @@ class Account(db.Model):
             result['last_bankruptcy'] = self.last_bankruptcy.isoformat()
         return result
     
-    def to_dict_with_products(self):
-        """Информация с товарами и подписками"""
+    def to_dict_with_products(self, is_active=True):
+        """Информация с товарами и подписками с фильтрацией по is_active"""
         data = self.to_dict()
         
-        # Активные товары продавца
+        # Товары продавца с фильтрацией по is_active
         data['products'] = [
             product.to_dict_for_creator() 
             for product in self.products 
-            if product.status in ['active', 'burned']
+            if product.is_active == is_active
         ]
         
-        # Активные подписки пользователя
+        # Подписки пользователя с фильтрацией по is_active товара
         data['subscriptions'] = [
             subscription.to_dict() 
             for subscription in self.subscriptions
+            if subscription.is_active == is_active and subscription.product.is_active == is_active
         ]
         
         return data
@@ -84,7 +89,7 @@ class Product(db.Model):
     title = db.Column(db.String(200), nullable=False)
     description = db.Column(db.Text)
     photo_url = db.Column(db.String(500), nullable=False)  # file_id
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=utc_now)
     
     # 💰 ЦЕНЫ И ПОРТФЕЛЬ
     current_price = db.Column(db.Integer, nullable=False)      # Цена на сегодня
@@ -95,11 +100,11 @@ class Product(db.Model):
     # 📊 ИСТОРИЯ ЦЕН (массив 6 чисел)
     price_history = db.Column(db.Text, default='[]')  # JSON: массив цен за 6 дней
     
-    # 📍 СТАТУС
-    status = db.Column(db.String(20), default='active')  # 'active', 'burned', 'burned_hidden'
+    # 📍 СТАТУС (заменен на is_active)
+    is_active = db.Column(db.Boolean, default=True)  # True = активен, False = неактивен (прогорел/снят)
     
-    # СЧЕТЧИК ПОДПИСЧИКОВ
-    active_subscriptions_count = db.Column(db.Integer, default=0)
+    # СЧЕТЧИК ПОДПИСЧИКОВ (переименован)
+    subscribers_count = db.Column(db.Integer, default=0)
     
     # ДЕНЬГИ С ПОДПИСОК (может быть отрицательным!)
     subscriptions_money = db.Column(db.Integer, default=0)
@@ -132,12 +137,12 @@ class Product(db.Model):
         """Возвращает массив цен для графика"""
         return json.loads(self.price_history)
     
-    def to_dict_public(self, show_secret_data=False):
-        """Общий вид карточки (для главной страницы)"""
-        if self.status != 'active' and not show_secret_data:
-            return None  # Не показываем burned товары всем
+    def to_dict_public(self, show_is_active=False):
+        """Общий вид карточки (для главной страницы) - только is_active==True"""
+        if not self.is_active and not show_is_active:
+            return None  # Не показываем неактивные товары всем
         
-        return {
+        result = {
             'id': self.id,
             'title': self.title,
             'creator': {
@@ -146,15 +151,21 @@ class Product(db.Model):
             },
             'current_price': self.current_price,
             'photo_url': f"/api/images/thumbnail/{self.photo_url}",
-            'status': self.status,
-            'active_subscriptions_count': self.active_subscriptions_count
+            'subscribers_count': self.subscribers_count
         }
+        
+        # Показываем is_active только если явно запрошено
+        if show_is_active:
+            result['is_active'] = self.is_active
+            
+        return result
     
-    def to_dict_detailed_public(self, show_secret_data=False):
+    def to_dict_detailed_public(self, show_is_active=False):
         """Подробный вид для всех пользователей"""
-        basic_info = self.to_dict_public(show_secret_data)
+        basic_info = self.to_dict_public(show_is_active)
         if basic_info is None:
             return None
+            
         return {
             **basic_info,
             'description': self.description,
@@ -164,32 +175,29 @@ class Product(db.Model):
     
     def to_dict_for_subscriber(self, subscription_price):
         """Данные для подписчика"""
-        data = self.to_dict_detailed_public(show_secret_data=True)
+        data = self.to_dict_detailed_public(show_is_active=True)
         data['subscription_price'] = subscription_price  # Цена, по которой подписался
         return data
     
     def to_dict_for_creator(self):
         """Данные для продавца (владельца)"""
-        if self.status == 'burned_hidden':
-            return None  # Скрытые товары не показываем даже продавцу
-        
-        data = self.to_dict_detailed_public(show_secret_data=True)
-        if not data:  # Если товар burned, to_dict_detailed_public вернет None
-            data = {
-                'id': self.id,
-                'title': self.title,
-                'status': self.status,
-                'current_price': self.current_price,
-                'portfolio': self.portfolio,
-                'startup_capital': self.startup_capital,
-                'subscriptions_money' : self.subscriptions_money,
-                'message': 'Товар прогорел'
-            }
-        else:
+        data = self.to_dict_detailed_public(show_is_active=True)
+        if data:
             data['next_day_price'] = self.next_day_price
             data['portfolio'] = self.portfolio
             data['startup_capital'] = self.startup_capital
             data['subscriptions_money'] = self.subscriptions_money
+        else:
+            # Для неактивных товаров
+            data = {
+                'id': self.id,
+                'title': self.title,
+                'is_active': self.is_active,
+                'current_price': self.current_price,
+                'portfolio': self.portfolio,
+                'startup_capital': self.startup_capital,
+                'subscriptions_money': self.subscriptions_money
+            }
         
         return data
     
@@ -201,7 +209,7 @@ class Product(db.Model):
         # Подсчитываем активные товары продавца
         active_products_count = len([
             p for p in account.products 
-            if p.status == 'active'
+            if p.is_active
         ])
         
         return active_products_count < MarketConfig.MAX_ACTIVE_PRODUCTS_PER_SELLER
@@ -211,12 +219,11 @@ class Subscription(db.Model):
     
     id = db.Column(db.String(36), primary_key=True, default=generate_uuid)
     subscriber_id = db.Column(db.String(36), db.ForeignKey('accounts.id'), nullable=False)
-    # product_id = db.Column(db.String(36), db.ForeignKey('products.id', ondelete='SET NULL'), nullable=True)
     product_id = db.Column(db.String(36), db.ForeignKey('products.id'), nullable=False)
     
     # 💰 ФИНАНСОВЫЕ ДАННЫЕ
     subscription_price = db.Column(db.Integer, nullable=False)  # Цена при подписке
-    status = db.Column(db.String(20), default='active')  # 'active', 'cancelled'
+    is_active = db.Column(db.Boolean, default=True)  # True = активна, False = отменена
     
     # Relationships
     subscriber = relationship("Account", back_populates="subscriptions")
@@ -226,17 +233,7 @@ class Subscription(db.Model):
         """Информация о подписке"""
         product_info = None
         if self.product:
-            if self.status == 'active':
-                product_info = self.product.to_dict_public()
-            elif self.status == 'cancelled':
-                # Для cancelled показываем базовую инфо даже если товар burned
-                product_info = {
-                    'id': self.product.id,
-                    'title': self.product.title,
-                    'status': self.product.status,
-                    'current_price': self.product.current_price if self.product else 0,
-                    'photo_url': f"/api/images/thumbnail/{self.product.photo_url}" if self.product else None
-                }
+            product_info = self.product.to_dict_public(show_is_active=True)
         
         return {
             'id': self.id,
@@ -244,5 +241,5 @@ class Subscription(db.Model):
             'product': product_info,
             'subscription_price': self.subscription_price,
             'current_price': self.product.current_price if self.product else 0,
-            'status': self.status
+            'is_active': self.is_active
         }

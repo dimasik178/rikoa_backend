@@ -1,28 +1,29 @@
-## Документация:
+## 📋 Market API - Документация (Версия 2.1)
 
-```markdown
-# 📋 Market API - Документация
-
-Документация REST API для платформы "Рынок товар с инвестициями".  
-**Версия:** 2.0  
 **Базовый URL:** `http://localhost:5000/api`
 
 ---
 
 ## 📊 Формат ответа
 
-### Успешный ответ:
+### Успешный ответ (200 OK):
 ```json
 {
-    "success": true,
     "data": { ... }
 }
 ```
 
-### Ошибка:
+или для списков:
 ```json
 {
-    "success": false,
+    "data": [...],
+    "pagination": { ... }
+}
+```
+
+### Ошибка (400+):
+```json
+{
     "error": "Описание ошибки"
 }
 ```
@@ -36,33 +37,25 @@
 Authorization: Bearer <access_token>
 ```
 
-Токен можно получить через:
-- `/auth/login` - вход
-- `/auth/register` - регистрация
-- `/auth/refresh` - обновление токена
-
 ---
 
 ## 📋 Эндпоинты API
 
 ### 1. 🩺 Проверка работоспособности
-
 **GET** `/health`
 
 **Ответ:**
 ```json
 {
-    "success": true,
     "status": "healthy",
     "timestamp": "2026-01-09T22:07:08.027927",
-    "version": "2.0"
+    "version": "2.1"
 }
 ```
 
 ---
 
 ### 2. 👤 Регистрация
-
 **POST** `/auth/register`
 
 **Тело запроса (JSON):**
@@ -74,24 +67,22 @@ Authorization: Bearer <access_token>
 }
 ```
 
-**Ответ:**
+**Ответ (201):**
 ```json
 {
-    "success": true,
-    "message": "Регистрация успешна",
-    "data": {
-        "user": {
-            "id": "dded37fe-0c12-4605-8b35-92ee53428cef",
-            "nickname": "username123",
-            "mail": "user@example.com",
-            "createdAt": "2026-01-09T22:07:08.027927",
-            "balance": 100
-        },
-        "tokens": {
-            "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
-            "refresh_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
-            "token_type": "Bearer"
-        }
+    "user": {
+        "id": "dded37fe-0c12-4605-8b35-92ee53428cef",
+        "nickname": "username123",
+        "mail": "user@example.com",
+        "created_at": "2026-01-09T22:07:08.027927",
+        "balance": 100,
+        "can_declare_bankruptcy": true,
+        "bankruptcy_count": 0
+    },
+    "tokens": {
+        "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+        "refresh_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+        "token_type": "Bearer"
     }
 }
 ```
@@ -99,7 +90,6 @@ Authorization: Bearer <access_token>
 ---
 
 ### 3. 🔑 Вход
-
 **POST** `/auth/login`
 
 **Тело запроса (JSON):**
@@ -110,25 +100,23 @@ Authorization: Bearer <access_token>
 }
 ```
 
-**Ответ:**
+**Ответ (200):**
 ```json
 {
-    "success": true,
-    "message": "Вход выполнен",
-    "data": {
-        "user": {
-            "id": "dded37fe-0c12-4605-8b35-92ee53428cef",
-            "nickname": "username123",
-            "mail": "user@example.com",
-            "createdAt": "2026-01-09T22:07:08.027927",
-            "balance": 100
-        },
-        "tokens": {
-            "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
-            "refresh_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
-            "token_type": "Bearer",
-            "expires_in": 3600
-        }
+    "user": {
+        "id": "dded37fe-0c12-4605-8b35-92ee53428cef",
+        "nickname": "username123",
+        "mail": "user@example.com",
+        "created_at": "2026-01-09T22:07:08.027927",
+        "balance": 100,
+        "can_declare_bankruptcy": true,
+        "bankruptcy_count": 0
+    },
+    "tokens": {
+        "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+        "refresh_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+        "token_type": "Bearer",
+        "expires_in": 3600
     }
 }
 ```
@@ -136,7 +124,6 @@ Authorization: Bearer <access_token>
 ---
 
 ### 4. 🔄 Обновление токена
-
 **POST** `/auth/refresh`
 
 **Тело запроса (JSON):**
@@ -146,96 +133,87 @@ Authorization: Bearer <access_token>
 }
 ```
 
-**Ответ:**
+**Ответ (200):**
 ```json
 {
-    "success": true,
-    "data": {
-        "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
-        "token_type": "Bearer",
-        "expires_in": 3600
-    }
+    "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+    "token_type": "Bearer",
+    "expires_in": 3600
 }
 ```
 
 ---
 
-### 5. 👤 Получение профиля
-
+### 5. 👤 Профиль пользователя
 **GET** `/auth/profile`  
-**Требуется токен**
+**Требуется токен**  
+**Параметр:** `is_active` (по умолчанию: `true`)
 
-**Ответ:**
+**Ответ (200):**
 ```json
 {
-    "success": true,
-    "data": {
-        "id": "dded37fe-0c12-4605-8b35-92ee53428cef",
-        "nickname": "test6",
-        "mail": "test6@mail.ru",
-        "createdAt": "2026-01-09T22:07:08.027927",
-        "balance": 89,
-        "products": [
-            {
-                "id": "85164644-1130-4058-9c6d-a80b78dcf595",
-                "title": "tests6product",
-                "description": "ffffffffffffffffffff",
+    "id": "dded37fe-0c12-4605-8b35-92ee53428cef",
+    "nickname": "test6",
+    "mail": "test6@mail.ru",
+    "created_at": "2026-01-09T22:07:08.027927",
+    "balance": 89,
+    "can_declare_bankruptcy": true,
+    "bankruptcy_count": 0,
+    "products": [
+        {
+            "id": "85164644-1130-4058-9c6d-a80b78dcf595",
+            "title": "tests6product",
+            "description": "ffffffffffffffffffff",
+            "creator": {
+                "id": "dded37fe-0c12-4605-8b35-92ee53428cef",
+                "nickname": "test6"
+            },
+            "current_price": 1,
+            "next_day_price": 1,
+            "photo_url": "/api/images/thumbnail/eac9a16b-6703-4b73-bc55-df6ad74f81ba",
+            "portfolio": 10,
+            "startup_capital": 10,
+            "subscriptions_money": 0,
+            "is_active": true,
+            "created_at": "2026-01-09T22:15:06.239156",
+            "price_history": [0, 0, 0, 0, 0, 0],
+            "subscribers_count": 0
+        }
+    ],
+    "subscriptions": [
+        {
+            "id": "ec27a6f5-07e5-45e7-a185-81cb17f6fc95",
+            "product_id": "0a0e2f6d-f9ce-4ec0-80c0-9348eec13a32",
+            "subscription_price": 1,
+            "current_price": 1,
+            "is_active": true,
+            "product": {
+                "id": "0a0e2f6d-f9ce-4ec0-80c0-9348eec13a32",
+                "title": "test1 tovar",
                 "creator": {
-                    "id": "dded37fe-0c12-4605-8b35-92ee53428cef",
-                    "nickname": "test6"
+                    "id": "b1a49600-8c0b-4038-8aa0-fa04f4f20fe6",
+                    "nickname": "test1"
                 },
                 "current_price": 1,
-                "next_day_price": 1,
-                "photo_url": "/api/images/thumbnail/eac9a16b-6703-4b73-bc55-df6ad74f81ba",
-                "portfolio": 10,
-                "startup_capital": 10,
-                "subscriptions_money": 0,
-                "status": "active",
-                "created_at": "2026-01-09T22:15:06.239156",
-                "price_history": [0, 0, 0, 0, 0, 0],
-                "active_subscriptions_count": 0
+                "photo_url": "/api/images/thumbnail/8b973eb0-e365-4d9e-a39a-27283fc44dfb",
+                "subscribers_count": 1
             }
-        ],
-        "subscriptions": [
-            {
-                "id": "ec27a6f5-07e5-45e7-a185-81cb17f6fc95",
-                "product_id": "0a0e2f6d-f9ce-4ec0-80c0-9348eec13a32",
-                "subscription_price": 1,
-                "current_price": 1,
-                "status": "active",
-                "product": {
-                    "id": "0a0e2f6d-f9ce-4ec0-80c0-9348eec13a32",
-                    "title": "test1 tovar",
-                    "creator": {
-                        "id": "b1a49600-8c0b-4038-8aa0-fa04f4f20fe6",
-                        "nickname": "test1"
-                    },
-                    "current_price": 1,
-                    "photo_url": "/api/images/thumbnail/8b973eb0-e365-4d9e-a39a-27283fc44dfb",
-                    "status": "active",
-                    "active_subscriptions_count": 1
-                }
-            }
-        ]
-    }
+        }
+    ]
 }
 ```
 
 ---
 
-### 6. 🛍️ Получение списка товаров
-
-**GET** `/products`
-
+### 6. 🛍️ Список товаров
+**GET** `/products`  
 **Параметры:**
-- `page` - номер страницы (по умолчанию: 1)
+- `page` (по умолчанию: 1)
+- `is_active` (по умолчанию: `true`)
 
-**Ответы (зависят от роли):**
-
-**Для неавторизованного пользователя:**
+**Ответ (200) - неавторизованный пользователь:**
 ```json
 {
-    "success": true,
     "data": [
         {
             "id": "85164644-1130-4058-9c6d-a80b78dcf595",
@@ -246,8 +224,7 @@ Authorization: Bearer <access_token>
             },
             "current_price": 1,
             "photo_url": "/api/images/thumbnail/eac9a16b-6703-4b73-bc55-df6ad74f81ba",
-            "status": "active",
-            "active_subscriptions_count": 0
+            "subscribers_count": 0
         }
     ],
     "pagination": {
@@ -259,105 +236,84 @@ Authorization: Bearer <access_token>
 }
 ```
 
-**Для продавца товара (дополнительные поля):**
-```json
-{
-    "id": "85164644-1130-4058-9c6d-a80b78dcf595",
-    "title": "tests6product",
-    "creator": { ... },
-    "current_price": 1,
-    "next_day_price": 1,
-    "photo_url": "...",
-    "portfolio": 10,
-    "startup_capital": 10,
-    "subscriptions_money": 0,
-    "status": "active",
-    "active_subscriptions_count": 0,
-    "description": "ffffffffffffffffffff",
-    "created_at": "2026-01-09T22:15:06.239156",
-    "price_history": [0, 0, 0, 0, 0, 0]
-}
-```
-
-**Для подписчика (дополнительные поля):**
-```json
-{
-    "id": "85164644-1130-4058-9c6d-a80b78dcf595",
-    "title": "tests6product",
-    "creator": { ... },
-    "current_price": 1,
-    "photo_url": "...",
-    "status": "active",
-    "active_subscriptions_count": 0,
-    "description": "ffffffffffffffffffff",
-    "created_at": "2026-01-09T22:15:06.239156",
-    "price_history": [0, 0, 0, 0, 0, 0],
-    "subscription_price": 1
-}
-```
+**Для продавца/подписчика добавляются поля:**
+- `is_active`: true/false
+- `description`
+- `price_history`
+- `created_at`
+- `next_day_price`, `portfolio`, `startup_capital`, `subscriptions_money` (только для продавца)
+- `subscription_price` (только для подписчика)
 
 ---
 
 ### 7. 🔍 Детальная информация о товаре
-
 **GET** `/products/{product_id}`
 
-**Параметры пути:**
-- `product_id` - UUID товара
-
-**Ответ (аналогично списку товаров, зависит от роли):**
+**Ответ (200):**
 ```json
 {
-    "success": true,
-    "data": { ... } // Один из форматов выше
+    "creator": {
+        "id": "34c61565-9844-4318-8dd9-f3a983ed29d3",
+        "nickname": "user_7"
+    },
+    "current_price": 9,
+    "id": "50b9ee48-8437-45cd-be09-5f99a56ec53e",
+    "photo_url": "/api/images/thumbnail/4c517751-0061-4033-a161-236665a3744a",
+    "is_active": true,
+    "title": "Популярный Экземпляр #1",
+    "price_history": [1, 1, 1, 1, 1, 4, 7],
+    "created_at": "2026-01-09T22:15:06.239156",
+    "subscribers_count": 12,
+    "description": "Крутое описание крутейшего продукта"
+}
+```
+
+**Ошибка (400):**
+```json
+{
+    "error": "Товар не найден или неактивен"
 }
 ```
 
 ---
 
 ### 8. ➕ Создание товара
-
 **POST** `/products`  
 **Требуется токен**  
 **Content-Type:** `multipart/form-data`
 
 **Поля формы:**
-- `title` - название товара (3-100 символов)
-- `price` - цена товара (1-10000 AC)
-- `description` - описание товара (до 1000 символов, опционально)
-- `image` - файл изображения
+- `title` (3-100 символов)
+- `price` (1-10000 AC)
+- `description` (до 1000 символов, опционально)
+- `image` (файл изображения)
 
-**Ответ:**
+**Ответ (201):**
 ```json
 {
-    "success": true,
-    "message": "Товар успешно создан",
-    "data": {
-        "id": "85164644-1130-4058-9c6d-a80b78dcf595",
-        "title": "tests6product",
-        "description": "ffffffffffffffffffff",
-        "creator": {
-            "id": "dded37fe-0c12-4605-8b35-92ee53428cef",
-            "nickname": "test6"
-        },
-        "current_price": 1,
-        "next_day_price": 1,
-        "photo_url": "/api/images/thumbnail/eac9a16b-6703-4b73-bc55-df6ad74f81ba",
-        "portfolio": 10,
-        "startup_capital": 10,
-        "subscriptions_money": 0,
-        "status": "active",
-        "created_at": "2026-01-09T22:15:06.239156",
-        "price_history": [0, 0, 0, 0, 0, 0],
-        "active_subscriptions_count": 0
-    }
+    "id": "85164644-1130-4058-9c6d-a80b78dcf595",
+    "title": "tests6product",
+    "description": "ffffffffffffffffffff",
+    "creator": {
+        "id": "dded37fe-0c12-4605-8b35-92ee53428cef",
+        "nickname": "test6"
+    },
+    "current_price": 1,
+    "next_day_price": 1,
+    "photo_url": "/api/images/thumbnail/eac9a16b-6703-4b73-bc55-df6ad74f81ba",
+    "portfolio": 10,
+    "startup_capital": 10,
+    "subscriptions_money": 0,
+    "is_active": true,
+    "created_at": "2026-01-09T22:15:06.239156",
+    "price_history": [0, 0, 0, 0, 0, 0],
+    "subscribers_count": 0
 }
 ```
 
 ---
 
 ### 9. 💰 Изменение цены товара
-
 **PUT** `/products/{product_id}/price`  
 **Требуется токен**
 
@@ -368,47 +324,41 @@ Authorization: Bearer <access_token>
 }
 ```
 
-**Ответ:**
+**Ответ (200):**
 ```json
 {
-    "success": true,
-    "message": "Цена изменена. Новая цена установится в 0:00",
-    "data": {
-        "id": "85164644-1130-4058-9c6d-a80b78dcf595",
-        "title": "tests6product",
-        "description": "ffffffffffffffffffff",
-        "creator": { ... },
-        "current_price": 1,
-        "next_day_price": 150,
-        "photo_url": "...",
-        "portfolio": 10,
-        "startup_capital": 10,
-        "subscriptions_money": 0,
-        "status": "active",
-        "created_at": "2026-01-09T22:15:06.239156",
-        "price_history": [0, 0, 0, 0, 0, 0],
-        "active_subscriptions_count": 0
-    }
+    "id": "85164644-1130-4058-9c6d-a80b78dcf595",
+    "title": "tests6product",
+    "description": "ffffffffffffffffffff",
+    "creator": { ... },
+    "current_price": 1,
+    "next_day_price": 150,
+    "photo_url": "...",
+    "portfolio": 10,
+    "startup_capital": 10,
+    "subscriptions_money": 0,
+    "is_active": true,
+    "created_at": "2026-01-09T22:15:06.239156",
+    "price_history": [0, 0, 0, 0, 0, 0],
+    "subscribers_count": 0
 }
 ```
 
 ---
 
 ### 10. 👍 Подписка на товар
-
 **POST** `/products/{product_id}/subscribe`  
 **Требуется токен**
 
-**Ответ:**
+**Ответ (200):**
 ```json
 {
-    "success": true,
     "subscription": {
         "id": "ec27a6f5-07e5-45e7-a185-81cb17f6fc95",
         "product_id": "0a0e2f6d-f9ce-4ec0-80c0-9348eec13a32",
         "subscription_price": 1,
         "current_price": 1,
-        "status": "active",
+        "is_active": true,
         "product": {
             "id": "0a0e2f6d-f9ce-4ec0-80c0-9348eec13a32",
             "title": "test1 tovar",
@@ -418,8 +368,7 @@ Authorization: Bearer <access_token>
             },
             "current_price": 1,
             "photo_url": "/api/images/thumbnail/8b973eb0-e365-4d9e-a39a-27283fc44dfb",
-            "status": "active",
-            "active_subscriptions_count": 1
+            "subscribers_count": 1
         }
     },
     "message": "Подписка оформлена за 1 AC"
@@ -429,23 +378,20 @@ Authorization: Bearer <access_token>
 ---
 
 ### 11. 👎 Отписка от товара
-
 **POST** `/products/{product_id}/unsubscribe`  
 **Требуется токен**
 
-**Ответ (успешная отписка):**
+**Ответ (200):**
 ```json
 {
-    "success": true,
     "message": "Отписка выполнена. Выплачено: 1 AC",
     "payout_amount": 1
 }
 ```
 
-**Ответ (прогорание товара):**
+**При прогорании товара:**
 ```json
 {
-    "success": true,
     "message": "Отписка выполнена. Выплачено: 50 AC",
     "payout_amount": 50,
     "warning": "Товар прогорел из-за недостатка средств в портфеле"
@@ -455,76 +401,51 @@ Authorization: Bearer <access_token>
 ---
 
 ### 12. 🗑️ Снятие товара с продажи
-
 **POST** `/products/{product_id}/remove`  
 **Требуется токен**
 
-**Ответ (активный товар):**
+**Ответ (200):**
 ```json
 {
-    "success": true,
     "message": "Товар снят с продажи. Получено: 1000 AC",
     "portfolio_transferred": 1000,
     "subscriptions_cancelled": 5,
     "subscription_ids_deleted": ["sub-uuid-1", "sub-uuid-2"],
-    "product_status": "burned_hidden"
-}
-```
-
-**Ответ (прогоревший товар):**
-```json
-{
-    "success": true,
-    "message": "Товар скрыт из профиля продавца",
-    "portfolio_transferred": 0,
-    "product_deleted": false
+    "product_is_active": false
 }
 ```
 
 ---
 
 ### 13. 🔎 Поиск товаров
-
-**GET** `/products/search`
-
-**Параметры запроса:**
+**GET** `/products/search`  
+**Параметры:**
 - `q` - поисковый запрос (обязательно)
-- `limit` - лимит результатов (по умолчанию: 20, максимум: 100)
-- `min_score` - минимальный порог релевантности (по умолчанию: 0.1)
+- `page` (по умолчанию: 1)
+- `min_score` (по умолчанию: 0.1)
 
-**Пример:**
-```
-GET /api/products/search?q=тест&limit=10&min_score=0.3
-```
-
-**Ответ:**
+**Ответ (200):**
 ```json
 {
-    "success": true,
-    "data": {
-        "results": [
-            {
-                "id": "0a0e2f6d-f9ce-4ec0-80c0-9348eec13a32",
-                "title": "test1 tovar",
-                "creator": {
-                    "id": "b1a49600-8c0b-4038-8aa0-fa04f4f20fe6",
-                    "nickname": "test1"
-                },
-                "current_price": 1,
-                "photo_url": "/api/images/thumbnail/8b973eb0-e365-4d9e-a39a-27283fc44dfb",
-                "status": "active",
-                "active_subscriptions_count": 1,
-                "relevance_score": 0.856
-            }
-        ],
-        "metadata": {
-            "query": "тест",
-            "total_products": 42,
-            "total_found": 5,
-            "limit": 10,
-            "min_score": 0.3,
-            "has_more": false
+    "results": [
+        {
+            "id": "0a0e2f6d-f9ce-4ec0-80c0-9348eec13a32",
+            "title": "test1 tovar",
+            "creator": {
+                "id": "b1a49600-8c0b-4038-8aa0-fa04f4f20fe6",
+                "nickname": "test1"
+            },
+            "current_price": 1,
+            "photo_url": "/api/images/thumbnail/8b973eb0-e365-4d9e-a39a-27283fc44dfb",
+            "subscribers_count": 1,
+            "relevance_score": 0.856
         }
+    ],
+    "pagination": {
+        "page": 1,
+        "per_page": 14,
+        "total": 5,
+        "pages": 1
     }
 }
 ```
@@ -532,35 +453,34 @@ GET /api/products/search?q=тест&limit=10&min_score=0.3
 ---
 
 ### 14. 🖼️ Получение изображения
-
 **GET** `/images/thumbnail/{file_id}`
-
-**Параметры пути:**
-- `file_id` - UUID файла изображения
 
 **Ответ:** Изображение в бинарном формате
 
-**Коды ошибок:**
-- `404` - Изображение не найдено
+**Ошибка (404):**
+```json
+{
+    "error": "Изображение не найдено"
+}
+```
 
 ---
 
-### 15. 📋 Получение подписок пользователя
-
+### 15. 📋 Подписки пользователя
 **GET** `/account/subscriptions`  
-**Требуется токен**
+**Требуется токен**  
+**Параметр:** `is_active` (по умолчанию: `true`)
 
-**Ответ:**
+**Ответ (200):**
 ```json
 {
-    "success": true,
     "data": [
         {
             "id": "ec27a6f5-07e5-45e7-a185-81cb17f6fc95",
             "product_id": "0a0e2f6d-f9ce-4ec0-80c0-9348eec13a32",
             "subscription_price": 1,
             "current_price": 1,
-            "status": "active",
+            "is_active": true,
             "product": {
                 "id": "0a0e2f6d-f9ce-4ec0-80c0-9348eec13a32",
                 "title": "test1 tovar",
@@ -570,8 +490,7 @@ GET /api/products/search?q=тест&limit=10&min_score=0.3
                 },
                 "current_price": 1,
                 "photo_url": "/api/images/thumbnail/8b973eb0-e365-4d9e-a39a-27283fc44dfb",
-                "status": "active",
-                "active_subscriptions_count": 1
+                "subscribers_count": 1
             }
         }
     ]
@@ -581,23 +500,12 @@ GET /api/products/search?q=тест&limit=10&min_score=0.3
 ---
 
 ### 16. 🏦 Объявление банкротства
-
 **POST** `/account/bankruptcy`  
 **Требуется токен**
 
-**Условия для банкротства:**
-1. Баланс < 100 AC (MarketConfig.BANKRUPTCY_RESET_BALANCE)
-2. Нет активных товаров на продаже
-3. Нет активных подписок
-4. Флаг `can_declare_bankruptcy` = true (сбрасывается при ежедневном обновлении цен)
-
-**Тело запроса (JSON):**  
-(Запрос не требует тела, только токен авторизации)
-
-**Ответ (успех):**
+**Ответ (200):**
 ```json
 {
-    "success": true,
     "message": "💸 Банкротство объявлено! Баланс изменён: 50 → 100 AC",
     "old_balance": 50,
     "new_balance": 100,
@@ -610,148 +518,31 @@ GET /api/products/search?q=тест&limit=10&min_score=0.3
 ---
 
 ### 17. 🏆 Рейтинг игроков
-
-**GET** `/players/rating`
-
+**GET** `/players/rating`  
 **Параметры:**
-- `page` - номер страницы (по умолчанию: 1)
-- `per_page` - количество игроков на странице (по умолчанию: 20, максимум: 100)
+- `page` (по умолчанию: 1)
+- `per_page` (по умолчанию: 20, минимум: 1, максимум: 100)
 
-**Ответ:**
+**Ответ (200):**
 ```json
 {
-    "success": true,
-    "data": {
-        "players": [
-            {
-                "id": "dded37fe-0c12-4605-8b35-92ee53428cef",
-                "nickname": "username123",
-                "balance": 1500,
-                "bankruptcy_count": 0,
-                "created_at": "2026-01-09T22:07:08.027927"
-            },
-            {
-                "id": "b1a49600-8c0b-4038-8aa0-fa04f4f20fe6",
-                "nickname": "test1",
-                "balance": 850,
-                "bankruptcy_count": 2,
-                "created_at": "2026-01-09T21:45:10.123456"
-            }
-        ],
-        "pagination": {
-            "page": 1,
-            "per_page": 20,
-            "total": 42,
-            "pages": 3
+    "players": [
+        {
+            "id": "dded37fe-0c12-4605-8b35-92ee53428cef",
+            "nickname": "username123",
+            "balance": 1500,
+            "bankruptcy_count": 0,
+            "created_at": "2026-01-09T22:07:08.027927"
         }
+    ],
+    "pagination": {
+        "page": 1,
+        "per_page": 20,
+        "total": 42,
+        "pages": 3
     }
 }
 ```
-
-**Описание:**
-Возвращает рейтинг игроков, отсортированный по убыванию баланса.  
-На первой странице - самые богатые игроки платформы.
-
-## 🏗️ Структура данных
-
-### Пользователь (User)
-```json
-{
-    "id": "uuid",
-    "nickname": "string",
-    "mail": "string",
-    "createdAt": "ISO datetime",
-    "balance": "integer",
-    "can_declare_bankruptcy": "boolean",
-    "bankruptcy_count": "integer",      // Опционально, только если > 0
-    "last_bankruptcy": "ISO datetime"   // Опционально, только если было банкротство
-}
-
-### Товар (Product) - публичный вид
-```json
-{
-    "id": "uuid",
-    "title": "string",
-    "creator": {
-        "id": "uuid",
-        "nickname": "string"
-    },
-    "current_price": "integer",
-    "photo_url": "string",
-    "status": "active|burned|burned_hidden",
-    "active_subscriptions_count": "integer"
-}
-```
-
-### Товар (Product) - для продавца (дополнительные поля)
-```json
-{
-    ...,
-    "next_day_price": "integer",
-    "portfolio": "integer",
-    "startup_capital": "integer",
-    "subscriptions_money": "integer",
-    "description": "string",
-    "created_at": "ISO datetime",
-    "price_history": [0, 0, 0, 0, 0, 0]
-}
-```
-
-### Подписка (Subscription)
-```json
-{
-    "id": "uuid",
-    "product_id": "uuid",
-    "subscription_price": "integer",
-    "current_price": "integer",
-    "status": "active|cancelled",
-    "product": { ... }
-}
-```
-
----
-
-## 💰 Экономические правила
-
-### Создание товара
-1. Продавец устанавливает цену (1-10000 AC)
-2. Стартовый капитал = цена × 10
-3. Баланс продавца уменьшается на стартовый капитал
-4. Портфель товара = стартовый капитал
-
-### Подписка
-1. Пользователь платит текущую цену товара
-2. Деньги добавляются в `portfolio` и `subscriptions_money`
-3. `active_subscriptions_count` увеличивается на 1
-
-### Отписка
-1. Проверка: достаточно ли денег в портфеле для выплаты текущей цены
-2. **Достаточно**: пользователь получает текущую цену
-3. **Недостаточно**: пользователь получает остаток, товар прогорает
-
-### Статусы товара
-- **active** - активный, можно подписываться
-- **burned** - прогоревший, показывается продавцу и подписчикам
-- **burned_hidden** - скрытый прогоревший, показывается только подписчикам
-
-### Цены
-- История хранит 6 последних цен
-- Цена обновляется ежедневно в 0:00
-- Новая цена на следующий день устанавливается через `/products/{id}/price`
-
-### Банкротство
-1. Пользователь может объявить банкротство, если:
-   - Баланс < 100 AC
-   - Нет активных товаров на продаже
-   - Нет активных подписок
-   - Флаг `can_declare_bankruptcy` = true
-2. После банкротства:
-   - Баланс устанавливается в 100 AC
-   - `bankruptcy_count` увеличивается на 1
-   - `last_bankruptcy` обновляется
-   - `can_declare_bankruptcy` устанавливается в false
-3. При ежедневном обновлении цен (0:00):
-   - Все пользователи получают `can_declare_bankruptcy` = true
 
 ---
 

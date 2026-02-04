@@ -145,49 +145,54 @@ def create_app():
                 token = auth_header.split(' ')[1]
             
             if not token:
-                return jsonify({'success': False, 'error': 'Токен отсутствует'}), 401
+                return jsonify({'error': 'Токен отсутствует'}), 401
             
             try:
                 payload = jwt_manager.decode_token(token)
                 user_id = payload.get('sub')
                 
                 if not user_id:
-                    return jsonify({'success': False, 'error': 'Неверный токен'}), 401
+                    return jsonify({'error': 'Неверный токен'}), 401
                 
                 account = db_manager.get_account_by_id(user_id)
                 if not account:
-                    return jsonify({'success': False, 'error': 'Пользователь не найден'}), 401
+                    return jsonify({'error': 'Пользователь не найден'}), 401
                 
                 # Проверяем, что токен не был отозван (опционально)
                 if payload.get('type') != 'access':
-                    return jsonify({'success': False, 'error': 'Неверный тип токена'}), 401
+                    return jsonify({'error': 'Неверный тип токена'}), 401
                 
                 return f(account, *args, **kwargs)
                 
             except ValueError as e:
-                return jsonify({'success': False, 'error': str(e)}), 401
+                return jsonify({'error': str(e)}), 401
             except Exception as e:
-                return jsonify({'success': False, 'error': 'Неверный токен'}), 401
+                return jsonify({'error': 'Неверный токен'}), 401
         
         return decorated
+    
+    def get_is_active_param():
+        """Получает параметр is_active из запроса"""
+        is_active_str = request.args.get('is_active', 'true').lower()
+        return is_active_str == 'true'
     
     # ========== ОБРАБОТЧИКИ ОШИБОК ==========
     
     @app.errorhandler(404)
     def not_found(error):
-        return jsonify({'success': False, 'error': 'Ресурс не найден'}), 404
+        return jsonify({'error': 'Ресурс не найден'}), 404
     
     @app.errorhandler(415)
     def unsupported_media_type(error):
-        return jsonify({'success': False, 'error': 'Неподдерживаемый тип медиа'}), 415
+        return jsonify({'error': 'Неподдерживаемый тип медиа'}), 415
     
     @app.errorhandler(413)
     def too_large(error):
-        return jsonify({'success': False, 'error': 'Файл слишком большой'}), 413
+        return jsonify({'error': 'Файл слишком большой'}), 413
     
     @app.errorhandler(500)
     def internal_error(error):
-        return jsonify({'success': False, 'error': 'Внутренняя ошибка сервера'}), 500
+        return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
     
     # ========== API ЭНДПОИНТЫ ==========
     
@@ -195,7 +200,6 @@ def create_app():
     @app.route('/api/health', methods=['GET'])
     def health_check():
         return jsonify({
-            'success': True,
             'status': 'healthy',
             'timestamp': datetime.now(timezone.utc).isoformat(),
             'version': MARKET_VERSION
@@ -207,7 +211,7 @@ def create_app():
         data = get_json_data()
         
         if not data or not all(k in data for k in ['login', 'mail', 'password']):
-            return jsonify({'success': False, 'error': 'Отсутствуют обязательные поля'}), 400
+            return jsonify({'error': 'Отсутствуют обязательные поля'}), 400
         
         try:
             account = db_manager.create_account(
@@ -223,22 +227,18 @@ def create_app():
             account_data = account.to_dict()
             
             return jsonify({
-                'success': True,
-                'message': 'Регистрация успешна',
-                'data': {
-                    'user': account_data,
-                    'tokens': {
-                        'access_token': access_token,
-                        'refresh_token': refresh_token,
-                        'token_type': 'Bearer'
-                    }
+                'user': account_data,
+                'tokens': {
+                    'access_token': access_token,
+                    'refresh_token': refresh_token,
+                    'token_type': 'Bearer'
                 }
             }), 201
             
         except ValueError as e:
-            return jsonify({'success': False, 'error': str(e)}), 400
+            return jsonify({'error': str(e)}), 400
         except Exception as e:
-            return jsonify({'success': False, 'error': 'Ошибка регистрации'}), 500
+            return jsonify({'error': 'Ошибка регистрации'}), 500
     
     # 3. Вход
     @app.route('/api/auth/login', methods=['POST'])
@@ -246,7 +246,7 @@ def create_app():
         data = get_json_data()
         
         if not data or not all(k in data for k in ['login', 'password']):
-            return jsonify({'success': False, 'error': 'Отсутствуют логин или пароль'}), 400
+            return jsonify({'error': 'Отсутствуют логин или пароль'}), 400
         
         account = db_manager.get_account_by_credentials(
             nickname=data['login'],
@@ -261,29 +261,24 @@ def create_app():
             account_data = account.to_dict()
             
             return jsonify({
-                'success': True,
-                'message': 'Вход выполнен',
-                'data': {
-                    'user': account_data,
-                    'tokens': {
-                        'access_token': access_token,
-                        'refresh_token': refresh_token,
-                        'token_type': 'Bearer',
-                        'expires_in': JWTConfig.ACCESS_TOKEN_EXPIRES
-                    }
+                'user': account_data,
+                'tokens': {
+                    'access_token': access_token,
+                    'refresh_token': refresh_token,
+                    'token_type': 'Bearer',
+                    'expires_in': JWTConfig.ACCESS_TOKEN_EXPIRES
                 }
             })
         else:
-            return jsonify({'success': False, 'error': 'Неверные учетные данные'}), 401
+            return jsonify({'error': 'Неверные учетные данные'}), 401
     
     # 4. Профиль пользователя
     @app.route('/api/auth/profile', methods=['GET'])
     @token_required
     def get_profile(current_account):
-        return jsonify({
-            'success': True,
-            'data': current_account.to_dict_with_products()
-        })
+        is_active = get_is_active_param()
+        
+        return jsonify(current_account.to_dict_with_products(is_active=is_active))
     
     # Обновление токена
     @app.route('/api/auth/refresh', methods=['POST'])
@@ -291,32 +286,43 @@ def create_app():
         data = get_json_data()
         
         if not data or 'refresh_token' not in data:
-            return jsonify({'success': False, 'error': 'Refresh token отсутствует'}), 400
+            return jsonify({'error': 'Refresh token отсутствует'}), 400
         
         try:
             new_access_token = jwt_manager.refresh_access_token(data['refresh_token'])
             
             if not new_access_token:
-                return jsonify({'success': False, 'error': 'Неверный refresh token'}), 401
+                return jsonify({'error': 'Неверный refresh token'}), 401
             
             return jsonify({
-                'success': True,
-                'data': {
-                    'access_token': new_access_token,
-                    'token_type': 'Bearer',
-                    'expires_in': JWTConfig.ACCESS_TOKEN_EXPIRES
-                }
+                'access_token': new_access_token,
+                'token_type': 'Bearer',
+                'expires_in': JWTConfig.ACCESS_TOKEN_EXPIRES
             })
             
         except ValueError as e:
-            return jsonify({'success': False, 'error': str(e)}), 401
+            return jsonify({'error': str(e)}), 401
         except Exception:
-            return jsonify({'success': False, 'error': 'Ошибка обновления токена'}), 500
+            return jsonify({'error': 'Ошибка обновления токена'}), 500
     
     # 5. Список товаров (главная страница)
     @app.route('/api/products', methods=['GET'])
     def get_products():
         page = request.args.get('page', 1, type=int)
+        is_active = get_is_active_param()
+        
+        # Без токена показываем только активные товары
+        if not request.headers.get('Authorization'):
+            is_active = True
+        
+        # Получаем пагинацию
+        pagination = db_manager.get_products_paginated(
+            page=page, 
+            per_page=ApiConfig.PRODUCTS_PER_PAGE,
+            is_active=is_active
+        )
+        
+        products_data = []
         
         # Получаем токен из заголовка
         token = None
@@ -324,17 +330,13 @@ def create_app():
         if auth_header and auth_header.startswith('Bearer '):
             token = auth_header.split(' ')[1]
         
-        # Получаем пагинацию
-        pagination = db_manager.get_products_paginated(
-            page=page, 
-            per_page=ApiConfig.PRODUCTS_PER_PAGE
-        )
-        
-        products_data = []
-        
         if not token:
             # Без токена - общий вид
-            products_data = [product.to_dict_public() for product in pagination.items]
+            products_data = [
+                product.to_dict_public(show_is_active=False) 
+                for product in pagination.items
+                if product.to_dict_public(show_is_active=False) is not None
+            ]
         else:
             # С токеном - определяем тип пользователя
             payload = jwt_manager.decode_token(token)
@@ -346,11 +348,11 @@ def create_app():
                         # Продавец
                         products_data.append(product.to_dict_for_creator())
                     else:
-                        # Проверяем подписку
+                        # Проверяем активную подписку
                         subscription = Subscription.query.filter_by(
                             subscriber_id=account.id,
                             product_id=product.id,
-                            status='active'
+                            is_active=True
                         ).first()
                         
                         if subscription:
@@ -360,12 +362,15 @@ def create_app():
                             )
                         else:
                             # Просто пользователь
-                            products_data.append(product.to_dict_public())
+                            products_data.append(product.to_dict_public(show_is_active=False))
             else:
-                products_data = [product.to_dict_public() for product in pagination.items]
+                products_data = [
+                    product.to_dict_public(show_is_active=False) 
+                    for product in pagination.items
+                    if product.to_dict_public(show_is_active=False) is not None
+                ]
         
         return jsonify({
-            'success': True,
             'data': products_data,
             'pagination': {
                 'page': page,
@@ -386,95 +391,62 @@ def create_app():
         
         product = db_manager.get_product(product_id)
         if not product:
-            return jsonify({'success': False, 'error': 'Товар не найден'}), 404
+            return jsonify({'error': 'Товар не найден'}), 404
         
-        # Проверяем статус товара
-        if product.status == 'burned_hidden':
-            # Скрытый товар - показываем только подписчикам
-            if not token:
-                return jsonify({'success': False, 'error': 'Товар не найден'}), 404
-            payload = jwt_manager.decode_token(token)
-            user_id = payload.get('sub')
-            account = db_manager.get_account_by_id(user_id)
-            if not account:
-                return jsonify({'success': False, 'error': 'Товар не найден'}), 404
-            
-            # Проверяем, есть ли у пользователя подписка на этот товар
-            has_subscription = Subscription.query.filter_by(
-                subscriber_id=account.id,
-                product_id=product.id
-            ).first() is not None
-            
-            if not has_subscription:
-                return jsonify({'success': False, 'error': 'Товар не найден'}), 404
-        
-        elif product.status == 'burned':
-            # Прогоревший товар - показываем продавцу и подписчикам
-            if token:
-                payload = jwt_manager.decode_token(token)
-                user_id = payload.get('sub')
-                account = db_manager.get_account_by_id(user_id)
-                if account:
-                    is_seller = product.creator_id == account.id
-                    has_subscription = Subscription.query.filter_by(
-                        subscriber_id=account.id,
-                        product_id=product.id
-                    ).first() is not None
-                    
-                    if is_seller or has_subscription:
-                        # Показываем специальную версию для burned
-                        return jsonify({
-                            'success': True,
-                            'data': {
-                                'id': product.id,
-                                'title': product.title,
-                                'status': product.status,
-                                'current_price': product.current_price,
-                                'portfolio': product.portfolio,
-                                'startup_capital': product.startup_capital,
-                                'message': 'Товар прогорел'
-                            }
-                        })
+        # Если товар неактивен и нет токена - 400
+        if not product.is_active and not token:
+            return jsonify({'error': 'Товар не найден или неактивен'}), 400
         
         if not token:
-            # Без токена
-            return jsonify({
-                'success': True,
-                'data': product.to_dict_detailed_public()
-            })
+            # Без токена - показываем только если товар активен
+            if not product.is_active:
+                return jsonify({'error': 'Товар не найден или неактивен'}), 400
+            return jsonify(product.to_dict_detailed_public(show_is_active=False))
         
-        account = db_manager.get_account_by_id(token)
+        # С токеном
+        payload = jwt_manager.decode_token(token)
+        user_id = payload.get('sub')
+        account = db_manager.get_account_by_id(user_id)
+        
         if not account:
-            return jsonify({
-                'success': True,
-                'data': product.to_dict_detailed_public()
-            })
+            return jsonify({'error': 'Пользователь не найден'}), 401
         
+        # Проверяем права доступа к is_active
+        show_is_active = False
         if product.creator_id == account.id:
-            # Продавец
-            return jsonify({
-                'success': True,
-                'data': product.to_dict_for_creator()
-            })
+            # Продавец - всегда видит is_active
+            show_is_active = True
         else:
-            # Ищем любую подписку пользователя на товар (active или cancelled)
+            # Проверяем активную подписку
             subscription = Subscription.query.filter_by(
                 subscriber_id=account.id,
                 product_id=product.id,
+                is_active=True
+            ).first()
+            if subscription:
+                # Подписчик - видит is_active
+                show_is_active = True
+        
+        # Если товар неактивен и пользователь не продавец/подписчик - 400
+        if not product.is_active and not show_is_active:
+            return jsonify({'error': 'Товар не найден или неактивен'}), 400
+        
+        if product.creator_id == account.id:
+            # Продавец
+            return jsonify(product.to_dict_for_creator())
+        else:
+            # Ищем любую подписку пользователя на товар
+            subscription = Subscription.query.filter_by(
+                subscriber_id=account.id,
+                product_id=product.id
             ).first()
             
             if subscription:
-                # Подписчик
-                return jsonify({
-                    'success': True,
-                    'data': product.to_dict_for_subscriber(subscription.subscription_price)
-                })
+                # Подписчик (активный или неактивный)
+                return jsonify(product.to_dict_for_subscriber(subscription.subscription_price))
             else:
                 # Просто пользователь
-                return jsonify({
-                    'success': True,
-                    'data': product.to_dict_detailed_public()
-                })
+                return jsonify(product.to_dict_detailed_public(show_is_active=show_is_active))
     
     # 7. Создание товара
     @app.route('/api/products', methods=['POST'])
@@ -482,41 +454,41 @@ def create_app():
     def create_product(current_account):
         if request.content_type and 'multipart/form-data' in request.content_type:
             if 'image' not in request.files:
-                return jsonify({'success': False, 'error': 'Файл изображения не предоставлен'}), 400
+                return jsonify({'error': 'Файл изображения не предоставлен'}), 400
             
             file = request.files['image']
             if file.filename == '':
-                return jsonify({'success': False, 'error': 'Файл не выбран'}), 400
+                return jsonify({'error': 'Файл не выбран'}), 400
             
             if not allowed_file(file.filename):
-                return jsonify({'success': False, 'error': 'Неподдерживаемый формат файла'}), 400
+                return jsonify({'error': 'Неподдерживаемый формат файла'}), 400
             
             title = request.form.get('title')
             price = request.form.get('price')
             description = request.form.get('description', '')
             
             if not all([title, price]):
-                return jsonify({'success': False, 'error': 'Отсутствуют обязательные поля'}), 400
+                return jsonify({'error': 'Отсутствуют обязательные поля'}), 400
             
             try:
                 price = int(price)
             except ValueError:
-                return jsonify({'success': False, 'error': 'Цена должна быть числом'}), 400
+                return jsonify({'error': 'Цена должна быть числом'}), 400
             
             # Валидация длины
             if len(title) < MarketConfig.MIN_TITLE_LENGTH:
-                return jsonify({'success': False, 'error': f'Название должно быть не менее {MarketConfig.MIN_TITLE_LENGTH} символов'}), 400
+                return jsonify({'error': f'Название должно быть не менее {MarketConfig.MIN_TITLE_LENGTH} символов'}), 400
             
             if len(title) > MarketConfig.MAX_TITLE_LENGTH:
-                return jsonify({'success': False, 'error': f'Название должно быть не более {MarketConfig.MAX_TITLE_LENGTH} символов'}), 400
+                return jsonify({'error': f'Название должно быть не более {MarketConfig.MAX_TITLE_LENGTH} символов'}), 400
             
             if len(description) > MarketConfig.MAX_DESCRIPTION_LENGTH:
-                return jsonify({'success': False, 'error': f'Описание должно быть не более {MarketConfig.MAX_DESCRIPTION_LENGTH} символов'}), 400
+                return jsonify({'error': f'Описание должно быть не более {MarketConfig.MAX_DESCRIPTION_LENGTH} символов'}), 400
             
             # Обработка изображения
             image_info, error = process_uploaded_image(file)
             if error:
-                return jsonify({'success': False, 'error': f'Ошибка обработки изображения: {error}'}), 400
+                return jsonify({'error': f'Ошибка обработки изображения: {error}'}), 400
             
             try:
                 product = db_manager.create_product(
@@ -527,19 +499,15 @@ def create_app():
                     photo_url=image_info['file_id']
                 )
                 
-                return jsonify({
-                    'success': True,
-                    'message': 'Товар успешно создан',
-                    'data': product.to_dict_for_creator()
-                }), 201
+                return jsonify(product.to_dict_for_creator()), 201
                 
             except ValueError as e:
-                return jsonify({'success': False, 'error': str(e)}), 400
+                return jsonify({'error': str(e)}), 400
             except Exception as e:
-                return jsonify({'success': False, 'error': 'Ошибка создания товара'}), 500
+                return jsonify({'error': 'Ошибка создания товара'}), 500
             
         else:
-            return jsonify({'success': False, 'error': 'Используйте form-data для загрузки изображений'}), 400
+            return jsonify({'error': 'Используйте form-data для загрузки изображений'}), 400
     
     # 8. Изменение цены товара
     @app.route('/api/products/<product_id>/price', methods=['PUT'])
@@ -548,12 +516,12 @@ def create_app():
         data = get_json_data()
         
         if not data or 'new_price' not in data:
-            return jsonify({'success': False, 'error': 'Отсутствует новая цена'}), 400
+            return jsonify({'error': 'Отсутствует новая цена'}), 400
         
         try:
             new_price = int(data['new_price'])
         except ValueError:
-            return jsonify({'success': False, 'error': 'Цена должна быть числом'}), 400
+            return jsonify({'error': 'Цена должна быть числом'}), 400
         
         try:
             product = db_manager.update_product_price(
@@ -562,16 +530,12 @@ def create_app():
                 new_price=new_price
             )
             
-            return jsonify({
-                'success': True,
-                'message': f'Цена изменена. Новая цена установится в {MarketConfig.PRICE_UPDATE_HOUR}',
-                'data': product.to_dict_for_creator()
-            })
+            return jsonify(product.to_dict_for_creator())
             
         except ValueError as e:
-            return jsonify({'success': False, 'error': str(e)}), 400
+            return jsonify({'error': str(e)}), 400
         except Exception as e:
-            return jsonify({'success': False, 'error': 'Ошибка изменения цены'}), 500
+            return jsonify({'error': 'Ошибка изменения цены'}), 500
     
     # 9. Подписка на товар
     @app.route('/api/products/<product_id>/subscribe', methods=['POST'])
@@ -582,9 +546,9 @@ def create_app():
             return jsonify(result)
             
         except ValueError as e:
-            return jsonify({'success': False, 'error': str(e)}), 400
+            return jsonify({'error': str(e)}), 400
         except Exception as e:
-            return jsonify({'success': False, 'error': 'Ошибка подписки'}), 500
+            return jsonify({'error': 'Ошибка подписки'}), 500
     
     # 10. Отписка от товара
     @app.route('/api/products/<product_id>/unsubscribe', methods=['POST'])
@@ -595,9 +559,9 @@ def create_app():
             return jsonify(result)
             
         except ValueError as e:
-            return jsonify({'success': False, 'error': str(e)}), 400
+            return jsonify({'error': str(e)}), 400
         except Exception as e:
-            return jsonify({'success': False, 'error': 'Ошибка отписки'}), 500
+            return jsonify({'error': 'Ошибка отписки'}), 500
     
     # 11. Снятие товара с продажи
     @app.route('/api/products/<product_id>/remove', methods=['POST'])
@@ -607,87 +571,88 @@ def create_app():
             result = db_manager.remove_product(product_id, current_account.id)
             return jsonify(result)
         except ValueError as e:
-            return jsonify({'success': False, 'error': str(e)}), 400
+            return jsonify({'error': str(e)}), 400
         except Exception as e:
-            # print(e) # TODO Ошибка, при снятии товара с продажи (500) 
-            return jsonify({'success': False, 'error': 'Ошибка снятия товара'}), 500
+            return jsonify({'error': 'Ошибка снятия товара'}), 500
     
     # 13. Поиск товаров
     @app.route('/api/products/search', methods=['GET'])
     def search_products():
         search_term = request.args.get('q', '').strip()
-        limit = request.args.get('limit', 20, type=int)
+        page = request.args.get('page', 1, type=int)
         min_score = request.args.get('min_score', 0.1, type=float)
         
         if not search_term:
-            return jsonify({'success': False, 'error': 'Поисковый запрос обязателен'}), 400
-        
-        if limit <= 0 or limit > 100:
-            return jsonify({'success': False, 'error': 'Лимит должен быть от 1 до 100'}), 400
+            return jsonify({'error': 'Поисковый запрос обязателен'}), 400
         
         if min_score < 0 or min_score > 1:
-            return jsonify({'success': False, 'error': 'Минимальный порог должен быть от 0 до 1'}), 400
+            return jsonify({'error': 'Минимальный порог должен быть от 0 до 1'}), 400
         
         try:
-            products = db_manager.get_all_active_products()
+            # Поиск всегда возвращает только активные товары
+            products = db_manager.get_all_products(is_active=True)
             
             if not products:
                 return jsonify({
-                    'success': True,
-                    'data': {
-                        'results': [],
-                        'metadata': {
-                            'query': search_term,
-                            'total_found': 0,
-                            'limit': limit,
-                            'min_score': min_score
-                        }
+                    'results': [],
+                    'pagination': {
+                        'page': page,
+                        'per_page': ApiConfig.SEARCH_RESULTS_PER_PAGE,
+                        'total': 0,
+                        'pages': 0
                     }
                 })
             
+            # Получаем все результаты поиска
             search_results = search_engine.search(
                 products=products,
                 search_term=search_term,
-                max_results=limit
+                max_results=ApiConfig.MAX_SEARCH_RESULTS
             )
             
+            # Фильтруем по минимальному порогу
             filtered_results = [
                 (product, score) for product, score in search_results 
                 if score >= min_score
             ]
             
+            # Применяем пагинацию
+            total_results = len(filtered_results)
+            per_page = ApiConfig.SEARCH_RESULTS_PER_PAGE
+            total_pages = (total_results + per_page - 1) // per_page
+            
+            start_idx = (page - 1) * per_page
+            end_idx = start_idx + per_page
+            paginated_results = filtered_results[start_idx:end_idx]
+            
+            # Форматируем результаты
             formatted_results = []
-            for product, score in filtered_results:
-                product_dict = product.to_dict_public()
+            for product, score in paginated_results:
+                product_dict = product.to_dict_public(show_is_active=False)
                 product_dict['relevance_score'] = round(score, 3)
                 formatted_results.append(product_dict)
             
             return jsonify({
-                'success': True,
-                'data': {
-                    'results': formatted_results,
-                    'metadata': {
-                        'query': search_term,
-                        'total_products': len(products),
-                        'total_found': len(formatted_results),
-                        'limit': limit,
-                        'min_score': min_score,
-                        'has_more': len(formatted_results) == limit
-                    }
+                'results': formatted_results,
+                'pagination': {
+                    'page': page,
+                    'per_page': per_page,
+                    'total': total_results,
+                    'pages': total_pages
                 }
             })
             
         except Exception as e:
             app.logger.error(f"Search error: {str(e)}")
-            return jsonify({'success': False, 'error': 'Ошибка поиска'}), 500
+            return jsonify({'error': 'Ошибка поиска'}), 500
     
     # 14. Получение изображения
     @app.route('/api/images/thumbnail/<file_id>')
     def serve_thumbnail_image(file_id):
         try:
             product = db_manager.get_product_by_photo_url(file_id)
-            if not product or (product.status != 'active' and product.status != 'burned'):
-                return jsonify({'success': False, 'error': 'Товар не найден'}), 404
+            if not product or not product.is_active:
+                return jsonify({'error': 'Товар не найден'}), 404
             
             # Пытаемся найти файл
             for ext in ['jpeg', 'jpg', 'png', 'gif', 'webp', 'bmp', 'tiff']:
@@ -699,27 +664,32 @@ def create_app():
                 if os.path.exists(thumbnail_path):
                     return send_file(thumbnail_path)
             
-            return jsonify({'success': False, 'error': 'Изображение не найдено'}), 404
+            return jsonify({'error': 'Изображение не найдено'}), 404
             
         except Exception as e:
-            return jsonify({'success': False, 'error': 'Ошибка загрузки изображения'}), 404
+            return jsonify({'error': 'Ошибка загрузки изображения'}), 404
     
     # 15. Получение подписок пользователя
     @app.route('/api/account/subscriptions', methods=['GET'])
     @token_required
     def get_user_subscriptions(current_account):
-        subscriptions = db_manager.get_user_subscriptions(current_account.id)
+        is_active = get_is_active_param()
         
-        subscriptions_data = []
+        subscriptions = db_manager.get_user_subscriptions(
+            current_account.id, 
+            is_active=is_active
+        )
+        
+        # Фильтруем по активности товара
+        filtered_subscriptions = []
         for subscription in subscriptions:
             product = db_manager.get_product(subscription.product_id)
-            if product:
+            if product and product.is_active == is_active:
                 sub_data = subscription.to_dict()
-                subscriptions_data.append(sub_data)
+                filtered_subscriptions.append(sub_data)
         
         return jsonify({
-            'success': True,
-            'data': subscriptions_data
+            'data': filtered_subscriptions
         })
     
     # 16. Объявление банкротства
@@ -731,9 +701,9 @@ def create_app():
             return jsonify(result)
             
         except ValueError as e:
-            return jsonify({'success': False, 'error': str(e)}), 400
+            return jsonify({'error': str(e)}), 400
         except Exception as e:
-            return jsonify({'success': False, 'error': 'Ошибка объявления банкротства'}), 500
+            return jsonify({'error': 'Ошибка объявления банкротства'}), 500
     
     @app.route('/api/players/rating', methods=['GET'])
     def get_player_rating():
@@ -744,7 +714,6 @@ def create_app():
         # Валидация параметров
         if per_page < ApiConfig.MIN_PLAYERS_PER_PAGE or per_page > ApiConfig.MAX_PLAYERS_PER_PAGE:
             return jsonify({
-                'success': False,
                 'error': f'Количество игроков на странице должно быть от {ApiConfig.MIN_PLAYERS_PER_PAGE} до {ApiConfig.MAX_PLAYERS_PER_PAGE}'
             }), 400        
         
@@ -752,15 +721,12 @@ def create_app():
             rating_data = db_manager.get_player_rating_paginated(page=page, per_page=per_page)
             
             return jsonify({
-                'success': True,
-                'data': {
-                    'players': rating_data['players'],
-                    'pagination': rating_data['pagination']
-                }
+                'players': rating_data['players'],
+                'pagination': rating_data['pagination']
             })
             
         except Exception as e:
             app.logger.error(f"Error getting player rating: {str(e)}")
-            return jsonify({'success': False, 'error': 'Ошибка получения рейтинга игроков'}), 500
+            return jsonify({'error': 'Ошибка получения рейтинга игроков'}), 500
 
     return app
