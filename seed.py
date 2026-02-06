@@ -164,12 +164,12 @@ def seed_database():
                 image_path = os.path.join(photo_examples_dir, image_file)
                 creator = random.choice(users)
                 
-                # Генерируем название
+                # Генерируем название (3-100 символов)
                 adjective = random.choice(adjectives)
                 noun = random.choice(nouns)
                 title = f"{adjective} {noun} #{i+1}"
                 
-                # Генерируем цену (от 10 до 100 AC)
+                # Генерируем цену (от 1 до 10 AC)
                 price = random.randint(1, 10)
                 
                 # Рассчитываем стартовый капитал
@@ -183,7 +183,7 @@ def seed_database():
                     continue
                 
                 # Проверяем лимит товаров продавца
-                active_products = len([p for p in creator.products if p.status == 'active'])
+                active_products = len([p for p in creator.products if p.is_active])
                 if active_products >= MarketConfig.MAX_ACTIVE_PRODUCTS_PER_SELLER:
                     print(f"   ⚠️ У продавца {creator.nickname} достигнут лимит товаров ({active_products}), пропускаем")
                     continue
@@ -201,17 +201,20 @@ def seed_database():
                     print(f"   ❌ Не удалось обработать изображение")
                     continue
                 
+                # Генерируем описание (до 1000 символов)
+                description = f"Это прекрасный товар '{title}'. Качественное исполнение, надежность и стильный дизайн. Этот экземпляр обладает уникальными характеристиками и высокой ценностью для коллекционеров и инвесторов."
+                
                 # Создаем товар
                 product = db_manager.create_product(
                     creator_id=creator.id,
                     title=title,
                     price=price,
-                    description=f"Это прекрасный товар {title}. Качественное исполнение, надежность и стильный дизайн.",
+                    description=description,
                     photo_url=image_info['file_id']
                 )
                 
                 products.append(product)
-                print(f"   ✅ Создан товар: {product.title} (Продавец: {creator.nickname}, Портфель: {product.portfolio} AC)")
+                print(f"   ✅ Создан товар: {product.title} (Продавец: {creator.nickname}, Текущая цена: {product.current_price} AC, Портфель: {product.portfolio} AC)")
                 
             except Exception as e:
                 print(f"   ❌ Ошибка создания товара: {e}")
@@ -251,6 +254,25 @@ def seed_database():
                     except Exception as e:
                         print(f"   ⚠️ Ошибка при создании подписки: {e}")
         
+        # Генерируем историю цен для всех товаров
+        print("\n📈 Генерируем историю цен...")
+        for product in products:
+            try:
+                # Создаем небольшую историю цен (от 1 до 7 дней)
+                days_history = random.randint(1, 7)
+                for day in range(days_history):
+                    # Генерируем случайное изменение цены
+                    price_change = random.uniform(-0.2, 0.3)  # -20% до +30%
+                    new_price = max(1, int(product.current_price * (1 + price_change)))
+                    
+                    # Обновляем цену (имитация дневного обновления)
+                    product.current_price = new_price
+                    # Здесь должен быть вызов метода обновления истории цен в БД
+                
+                print(f"   ✅ История цен для {product.title}: {days_history} дней, текущая цена: {product.current_price} AC")
+            except Exception as e:
+                print(f"   ⚠️ Ошибка генерации истории цен: {e}")
+        
         # Статистика
         print("\n🎉 Заполнение завершено!")
         print(f"📊 Итоговая статистика:")
@@ -269,18 +291,35 @@ def seed_database():
         # Показываем балансы пользователей
         print(f"\n💳 Балансы пользователей (первые 10):")
         for user in users[:10]:
-            active_products = len([p for p in user.products if p.status == 'active'])
-            subscriptions = len([s for s in user.subscriptions if s.status == 'active'])
+            active_products = len([p for p in user.products if p.is_active])
+            subscriptions = len([s for s in user.subscriptions if s.is_active])
             print(f"   {user.nickname}: {user.balance} AC (товаров: {active_products}, подписок: {subscriptions})")
         
-        print("\n🔗 API доступно по адресу: http://localhost:5000")
+        # Показываем топ-5 товаров по подписчикам
+        print(f"\n🏆 Топ-5 товаров по подписчикам:")
+        products_by_subscribers = sorted(products, key=lambda p: p.subscribers_count, reverse=True)
+        for i, product in enumerate(products_by_subscribers[:5]):
+            print(f"   {i+1}. {product.title}: {product.subscribers_count} подписчиков, цена: {product.current_price} AC")
+        
+        print("\n🔗 API v2.1 доступно по адресу: http://localhost:5000")
         print("📚 Основные эндпоинты API:")
-        print("   GET  /api/health - проверка работы")
-        print("   POST /api/auth/register - регистрация")
-        print("   POST /api/auth/login - вход")
-        print("   GET  /api/products - список товаров")
-        print("   POST /api/products - создать товар")
-        print("   GET  /api/products/<id> - информация о товаре")
+        print("   GET    /api/health - проверка работы")
+        print("   POST   /api/auth/register - регистрация")
+        print("   POST   /api/auth/login - вход")
+        print("   POST   /api/auth/refresh - обновление токена")
+        print("   GET    /api/auth/profile - профиль пользователя")
+        print("   GET    /api/products - список товаров")
+        print("   POST   /api/products - создать товар (multipart/form-data)")
+        print("   GET    /api/products/<id> - информация о товаре")
+        print("   PUT    /api/products/<id>/price - изменить цену")
+        print("   POST   /api/products/<id>/subscribe - подписаться")
+        print("   POST   /api/products/<id>/unsubscribe - отписаться")
+        print("   POST   /api/products/<id>/remove - снять с продажи")
+        print("   GET    /api/products/search - поиск товаров")
+        print("   GET    /api/account/subscriptions - мои подписки")
+        print("   POST   /api/account/bankruptcy - объявить банкротство")
+        print("   GET    /api/players/rating - рейтинг игроков")
+        print("   GET    /api/images/thumbnail/<file_id> - получить изображение")
         print("\n🚀 Для запуска сервера выполните: python main.py")
 
 if __name__ == "__main__":
