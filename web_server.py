@@ -12,9 +12,23 @@ from search_engine import search_engine
 from models import Product, Subscription
 from jwt_manager import jwt_manager
 from dotenv import load_dotenv
-    
+
 def create_app():
     load_dotenv()  # Загружаем переменные
+    
+    # Обязательные поля
+    required_vars = [
+        'DATABASE_URL',
+        'SECRET_KEY', 
+        'JWT_SECRET_KEY',
+        'JWT_ALGORITHM',
+        'JWT_ACCESS_TOKEN_EXPIRES',
+        'JWT_REFRESH_TOKEN_EXPIRES'
+    ]
+    
+    missing = [var for var in required_vars if not os.getenv(var)]
+    if missing:
+        raise ValueError(f"❌ Отсутствуют в .env: {', '.join(missing)}")
     
     app = Flask(__name__)
     

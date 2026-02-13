@@ -1,4 +1,6 @@
 /__pycache__
 *.pyc
 .env
-/marketplace_venv
+instance/
+marketplace_env/
+uploads/

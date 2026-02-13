@@ -244,13 +244,9 @@ def seed_database():
                     try:
                         # Проверяем баланс подписчика
                         if subscriber.balance >= product.current_price:
-                            result = db_manager.subscribe_to_product(subscriber.id, product.id)
-                            if result.get('success'):
-                                subscription_count += 1
-                                print(f"   ✅ Подписка: {subscriber.nickname} → {product.title} за {product.current_price} AC")
-                            else:
-                                error_msg = result.get('error', 'Unknown error')
-                                print(f"   ⚠️ Ошибка подписки: {error_msg}")
+                            db_manager.subscribe_to_product(subscriber.id, product.id)
+                            subscription_count += 1
+                            print(f"   ✅ Подписка: {subscriber.nickname} → {product.title} за {product.current_price} AC")
                     except Exception as e:
                         print(f"   ⚠️ Ошибка при создании подписки: {e}")
         

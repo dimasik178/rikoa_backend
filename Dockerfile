@@ -21,11 +21,18 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Копируем весь проект
 COPY . .
 
+# Делаем entrypoint скрипт исполняемым
+COPY docker-entrypoint.sh /
+RUN chmod +x /docker-entrypoint.sh
+
 # Создаем необходимые директории
 RUN mkdir -p uploads uploads/thumbnails photo_examples instance
 
 # Открываем порт
 EXPOSE 5000
+
+# Обязательные проверки
+ENTRYPOINT ["/docker-entrypoint.sh"]
 
 # Запуск
 CMD ["python", "main.py"]

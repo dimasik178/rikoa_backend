@@ -9,48 +9,16 @@
 
 "Система имитирует рыночные механизмы для изучения основ экономики"
 
-## 🆕 Новые возможности версии 2.1
+## ⚡️ Быстрый старт (2 команды)
 
-- **Фильтрация по активности**: параметр `is_active` для просмотра активных/неактивных товаров
-- **Единый стиль полей**: все поля API в snake_case (например: `created_at`, `current_price`)
-- **Улучшенные ответы API**: убраны избыточные поля, улучшена семантика статус-кодов
-- **Пагинация в поиске**: 14 результатов на страницу, максимум 100 результатов
-- **Безопасность доступа**: неактивные товары скрыты от неавторизованных пользователей
-
-## 📦 Быстрый старт
-
-### 1. Клонирование репозитория
+### 1. Клонируйте и соберите
 ```bash
 git clone https://github.com/dimasik178/rikoa_backend.git
 cd rikoa_backend
-```
-
-### 2. Настройка окружения
-
-Создайте файл `.env` в корне проекта с содержанием:
-```env
-# Database
-DATABASE_URL=sqlite:///market.db
-
-# Flask
-FLASK_ENV=production # development or production 
-
-# JWT
-JWT_SECRET_KEY=your-secret-key-blazorandreact-jwt
-JWT_ALGORITHM=HS256
-JWT_ACCESS_TOKEN_EXPIRES=3600
-JWT_REFRESH_TOKEN_EXPIRES=2592000
-SECRET_KEY=your-secret-key-blazorandreact-flask
-```
-
-### 3. Сборка Docker образа
-```bash
 sudo docker build -t school-art-market .
 ```
 
-## 🚀 Запуск контейнера
-
-### Вариант A: Простой запуск
+### 2. Запустите
 ```bash
 sudo docker run -d \
   --name art-market \
@@ -60,29 +28,7 @@ sudo docker run -d \
   school-art-market
 ```
 
-### Вариант B: С монтированием папки с фото
-```bash
-sudo docker run -d \
-  --name art-market \
-  -p 5000:5000 \
-  -v $(pwd)/photo_examples:/app/photo_examples \
-  -v art-market-uploads:/app/uploads \
-  -v art-market-data:/app \
-  school-art-market
-```
-
-### Вариант C: С пробросом `.env` файла
-```bash
-sudo docker run -d \
-  --name art-market \
-  -p 5000:5000 \
-  -v $(pwd)/.env:/app/.env \
-  -v $(pwd)/photo_examples:/app/photo_examples \
-  -v art-market-uploads:/app/uploads \
-  school-art-market
-```
-
-### 5. Проверка работы
+### Проверка работы
 Откройте в браузере: `http://localhost:5000/api/health`
 
 Или выполните:
@@ -94,8 +40,8 @@ curl http://localhost:5000/api/health
 ```json
 {
   "status": "healthy",
-  "timestamp": "2026-01-14T17:15:35.367234+00:00",
-  "version": "2.1"
+  "timestamp": "2026-02-13T10:00:00.000000+00:00",
+  "version": "3.2"
 }
 ```
 
@@ -220,6 +166,12 @@ sudo docker start art-market
 sudo docker restart art-market
 # Удалить контейнер
 sudo docker rm -f art-market
+# Посмотреть созданные образы (все: "-a")
+docker images -a
 # Удалить образ
 sudo docker rmi school-art-market
+# Посмотреть тома (к ним можно монтировать контейнеры)
+sudo docker volume ls
+# Удалить том
+sudo docker volume rm art-market-data
 ```

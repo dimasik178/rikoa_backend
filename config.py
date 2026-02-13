@@ -2,8 +2,14 @@ from dotenv import load_dotenv
 import os 
 # 🔧 КОНФИГУРАЦИЯ ПРОЕКТА "РЫНОК ТОВАРОВ С ИНВЕСТИЦИЯМИ"
 
+#===================================[ Изменения ]====================================#
+#                                    Версия: 3.2                                     #
+# Обновил запуск контейнера + подправил выгрузку и проверку переменных из .env файла #
+#         Также убрал из сидинга проверку sucess - который ушёл в версии 3.1         #
+#====================================================================================#
+
 load_dotenv()
-MARKET_VERSION = "3.1" # Версия проекта, возвращается на /api/health
+MARKET_VERSION = "3.2" # Версия проекта, возвращается на /api/health
 
 # 🌱 НАСТРОЙКИ ЗАПОЛНЕНИЯ БАЗЫ ДАННЫХ (для seed.py)
 NUM_USERS = 15                    # Количество пользователей для сидинга
@@ -47,9 +53,7 @@ class MarketConfig:
 class ServerConfig:
     """Конфигурация сервера"""
     
-    # FLASK НАСТРОЙКИ
-    SECRET_KEY = 'your-secret-key-here-change-in-production'
-    SQLALCHEMY_DATABASE_URI = 'sqlite:///market.db'
+    SECRET_KEY = os.getenv("SECRET_KEY")
     SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL")
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     
