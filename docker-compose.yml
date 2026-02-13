@@ -1,0 +1,45 @@
+version: '3.2'
+
+services:
+  market:
+    # Сборка из текущей директории
+    build:
+      context: .
+      dockerfile: Dockerfile
+    
+    container_name: art-market
+    
+    # Проброс портов
+    ports:
+      - "5000:5000"
+    
+    # Переменные окружения
+    environment:
+      - TZ=Europe/Moscow
+    
+    # Тома для постоянных данных (только то, что должно сохраняться)
+    volumes:
+      # Том для загруженных изображений
+      - market-uploads:/app/uploads
+      # Том для базы данных
+      - market-db:/app/instance
+      # Опционально: папка с тестовыми фото (раскомментировать если нужно)
+      # - ./photo_examples:/app/photo_examples
+    
+    # Политика рестарта
+    restart: unless-stopped
+    
+    # Проверка здоровья
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+# Определяем тома для постоянных данных
+volumes:
+  market-uploads:
+    name: art-market-uploads
+  market-db:
+    name: art-market-db
