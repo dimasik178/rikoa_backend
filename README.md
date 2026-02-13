@@ -87,6 +87,8 @@ sudo docker rm art-market
 ├── .env                   # Переменные окружения
 ├── .gitignore             # Файлы, игнорируемые Git
 ├── Dockerfile             # Конфигурация Docker
+├── docker-compose.yml     # Конфигурация Docker-compose
+├── docker-entrypoint.sh   # Проверка .env для запуска через Docker
 ├── README.md              # Документация проекта
 ├── docs.md                # Детальная документация API
 ├── requirements.txt       # Зависимости Python
