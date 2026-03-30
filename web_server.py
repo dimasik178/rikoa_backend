@@ -7,11 +7,15 @@ from datetime import timezone, datetime
 import uuid
 from PIL import Image
 from functools import wraps
-from config import ServerConfig, ApiConfig, MarketConfig, JWTConfig, MARKET_VERSION
+from config import ServerConfig, ApiConfig, JWTConfig, MARKET_VERSION
 from search_engine import search_engine
-from models import Product, Subscription
 from jwt_manager import jwt_manager
 from dotenv import load_dotenv
+from watermark import add_watermark
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 def create_app():
     load_dotenv()  # Загружаем переменные
@@ -72,8 +76,8 @@ def create_app():
     jwt_manager.init_app(app)
     
     # Создаем папки для загрузок
-    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-    os.makedirs(os.path.join(app.config['UPLOAD_FOLDER'], 'thumbnails'), exist_ok=True)
+    os.makedirs(ServerConfig.ORIGINALS_FOLDER, exist_ok=True)
+    os.makedirs(ServerConfig.WATERMARKED_FOLDER, exist_ok=True)
     
     # Инициализация базы данных
     db_manager.init_app(app)
@@ -85,7 +89,7 @@ def create_app():
                filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
     
     def process_uploaded_image(file):
-        """Обрабатывает загруженное изображение"""
+        """Обрабатывает загруженное изображение: сохраняет оригинал и создает копию с водяным знаком"""
         try:
             file.seek(0, os.SEEK_END)
             file_size = file.tell()
@@ -107,28 +111,31 @@ def create_app():
             file_id = str(uuid.uuid4())
             original_extension = image.format.lower()
             
-            # Создаем превью
-            thumbnail_size = (800, 800)
-            thumbnail_filename = f"{file_id}_thumbnail.{original_extension}"
-            thumbnail_path = os.path.join(app.config['UPLOAD_FOLDER'], 'thumbnails', thumbnail_filename)
+            # Пути для сохранения
+            original_filename = f"{file_id}.{original_extension}"
+            original_path = os.path.join(ServerConfig.ORIGINALS_FOLDER, original_filename)
+            watermarked_path = os.path.join(ServerConfig.WATERMARKED_FOLDER, original_filename)
             
-            # Сохраняем превью
-            image.thumbnail(thumbnail_size, Image.Resampling.LANCZOS)
-            
+            # Сохраняем оригинал
             if image.format == 'PNG':
-                image.save(thumbnail_path, optimize=True)
+                image.save(original_path, optimize=True)
             else:
                 if image.mode in ('RGBA', 'LA', 'P'):
                     background = Image.new('RGB', image.size, (255, 255, 255))
                     background.paste(image, mask=image.split()[-1] if image.mode == 'RGBA' else None)
                     image = background
-                image.save(thumbnail_path, optimize=True, quality=85)
+                image.save(original_path, optimize=True, quality=85)
+            
+            # Создаем копию с водяным знаком
+            if not add_watermark(original_path, watermarked_path):
+                return None, "Ошибка добавления водяного знака"
             
             image.close()
             
             return {
-                'thumbnail': thumbnail_filename,
-                'file_id': file_id
+                'file_id': file_id,
+                'original_path': original_path,
+                'watermarked_path': watermarked_path
             }, None
             
         except Exception as e:
@@ -186,7 +193,7 @@ def create_app():
         return decorated
     
     def get_is_active_param():
-        """Получает параметр is_active из запроса"""
+        """Получает параметр is_active из запроса (для совместимости)"""
         is_active_str = request.args.get('is_active', 'true').lower()
         return is_active_str == 'true'
     
@@ -290,11 +297,9 @@ def create_app():
     @app.route('/api/auth/profile', methods=['GET'])
     @token_required
     def get_profile(current_account):
-        is_active = get_is_active_param()
-        
-        return jsonify(current_account.to_dict_with_products(is_active=is_active))
+        return jsonify(current_account.to_dict_with_products())
     
-    # Обновление токена
+    # 5. Обновление токена
     @app.route('/api/auth/refresh', methods=['POST'])
     def refresh_token():
         data = get_json_data()
@@ -319,70 +324,22 @@ def create_app():
         except Exception:
             return jsonify({'error': 'Ошибка обновления токена'}), 500
     
-    # 5. Список товаров (главная страница)
+    # 6. Список товаров (главная страница) - только непроданные, с водяным знаком
     @app.route('/api/products', methods=['GET'])
     def get_products():
         page = request.args.get('page', 1, type=int)
-        is_active = get_is_active_param()
         
-        # Без токена показываем только активные товары
-        if not request.headers.get('Authorization'):
-            is_active = True
-        
-        # Получаем пагинацию
+        # Получаем пагинацию только непроданных товаров
         pagination = db_manager.get_products_paginated(
             page=page, 
-            per_page=ApiConfig.PRODUCTS_PER_PAGE,
-            is_active=is_active
+            per_page=ApiConfig.PRODUCTS_PER_PAGE
         )
         
         products_data = []
-        
-        # Получаем токен из заголовка
-        token = None
-        auth_header = request.headers.get('Authorization')
-        if auth_header and auth_header.startswith('Bearer '):
-            token = auth_header.split(' ')[1]
-        
-        if not token:
-            # Без токена - общий вид
-            products_data = [
-                product.to_dict_public(show_is_active=False) 
-                for product in pagination.items
-                if product.to_dict_public(show_is_active=False) is not None
-            ]
-        else:
-            # С токеном - определяем тип пользователя
-            payload = jwt_manager.decode_token(token)
-            user_id = payload.get('sub')
-            account = db_manager.get_account_by_id(user_id)
-            if account:
-                for product in pagination.items:
-                    if product.creator_id == account.id:
-                        # Продавец
-                        products_data.append(product.to_dict_for_creator())
-                    else:
-                        # Проверяем активную подписку
-                        subscription = Subscription.query.filter_by(
-                            subscriber_id=account.id,
-                            product_id=product.id,
-                            is_active=True
-                        ).first()
-                        
-                        if subscription:
-                            # Подписчик
-                            products_data.append(
-                                product.to_dict_for_subscriber(subscription.subscription_price)
-                            )
-                        else:
-                            # Просто пользователь
-                            products_data.append(product.to_dict_public(show_is_active=False))
-            else:
-                products_data = [
-                    product.to_dict_public(show_is_active=False) 
-                    for product in pagination.items
-                    if product.to_dict_public(show_is_active=False) is not None
-                ]
+        for product in pagination.items:
+            product_dict = product.to_dict_public()
+            if product_dict:
+                products_data.append(product_dict)
         
         return jsonify({
             'data': products_data,
@@ -394,7 +351,7 @@ def create_app():
             }
         })
     
-    # 6. Подробная информация о товаре
+    # 7. Детальная информация о товаре
     @app.route('/api/products/<product_id>', methods=['GET'])
     def get_product_detail(product_id):
         # Получаем токен
@@ -407,15 +364,15 @@ def create_app():
         if not product:
             return jsonify({'error': 'Товар не найден'}), 404
         
-        # Если товар неактивен и нет токена - 400
-        if not product.is_active and not token:
-            return jsonify({'error': 'Товар не найден или неактивен'}), 400
+        # Если товар продан и нет токена - 404
+        if product.is_sold and not token:
+            return jsonify({'error': 'Товар не найден'}), 404
         
         if not token:
-            # Без токена - показываем только если товар активен
-            if not product.is_active:
-                return jsonify({'error': 'Товар не найден или неактивен'}), 400
-            return jsonify(product.to_dict_detailed_public(show_is_active=False))
+            # Без токена - показываем только если товар не продан
+            if product.is_sold:
+                return jsonify({'error': 'Товар не найден'}), 404
+            return jsonify(product.to_dict_detailed_public())
         
         # С токеном
         payload = jwt_manager.decode_token(token)
@@ -425,44 +382,28 @@ def create_app():
         if not account:
             return jsonify({'error': 'Пользователь не найден'}), 401
         
-        # Проверяем права доступа к is_active
-        show_is_active = False
-        if product.creator_id == account.id:
-            # Продавец - всегда видит is_active
-            show_is_active = True
-        else:
-            # Проверяем активную подписку
-            subscription = Subscription.query.filter_by(
-                subscriber_id=account.id,
-                product_id=product.id,
-                is_active=True
-            ).first()
-            if subscription:
-                # Подписчик - видит is_active
-                show_is_active = True
+        # Проверяем права доступа
+        is_creator = product.creator_id == account.id
+        is_owner = product.owner_id == account.id
         
-        # Если товар неактивен и пользователь не продавец/подписчик - 400
-        if not product.is_active and not show_is_active:
-            return jsonify({'error': 'Товар не найден или неактивен'}), 400
-        
-        if product.creator_id == account.id:
-            # Продавец
-            return jsonify(product.to_dict_for_creator())
-        else:
-            # Ищем любую подписку пользователя на товар
-            subscription = Subscription.query.filter_by(
-                subscriber_id=account.id,
-                product_id=product.id
-            ).first()
+        if product.is_sold:
+            # Проданный товар видят только создатель и покупатель
+            if not (is_creator or is_owner):
+                return jsonify({'error': 'Товар не найден'}), 404
             
-            if subscription:
-                # Подписчик (активный или неактивный)
-                return jsonify(product.to_dict_for_subscriber(subscription.subscription_price))
+            if is_owner:
+                return jsonify(product.to_dict_for_owner())
             else:
-                # Просто пользователь
-                return jsonify(product.to_dict_detailed_public(show_is_active=show_is_active))
+                # Создатель видит проданный товар
+                return jsonify(product.to_dict_for_creator())
+        else:
+            # Непроданный товар
+            if is_creator:
+                return jsonify(product.to_dict_for_creator())
+            else:
+                return jsonify(product.to_dict_detailed_public())
     
-    # 7. Создание товара
+    # 8. Создание товара
     @app.route('/api/products', methods=['POST'])
     @token_required
     def create_product(current_account):
@@ -489,16 +430,6 @@ def create_app():
             except ValueError:
                 return jsonify({'error': 'Цена должна быть числом'}), 400
             
-            # Валидация длины
-            if len(title) < MarketConfig.MIN_TITLE_LENGTH:
-                return jsonify({'error': f'Название должно быть не менее {MarketConfig.MIN_TITLE_LENGTH} символов'}), 400
-            
-            if len(title) > MarketConfig.MAX_TITLE_LENGTH:
-                return jsonify({'error': f'Название должно быть не более {MarketConfig.MAX_TITLE_LENGTH} символов'}), 400
-            
-            if len(description) > MarketConfig.MAX_DESCRIPTION_LENGTH:
-                return jsonify({'error': f'Описание должно быть не более {MarketConfig.MAX_DESCRIPTION_LENGTH} символов'}), 400
-            
             # Обработка изображения
             image_info, error = process_uploaded_image(file)
             if error:
@@ -523,73 +454,32 @@ def create_app():
         else:
             return jsonify({'error': 'Используйте form-data для загрузки изображений'}), 400
     
-    # 8. Изменение цены товара
-    @app.route('/api/products/<product_id>/price', methods=['PUT'])
+    # 9. Покупка товара
+    @app.route('/api/products/<product_id>/buy', methods=['POST'])
     @token_required
-    def update_product_price(current_account, product_id):
-        data = get_json_data()
-        
-        if not data or 'new_price' not in data:
-            return jsonify({'error': 'Отсутствует новая цена'}), 400
-        
+    def buy_product(current_account, product_id):
         try:
-            new_price = int(data['new_price'])
-        except ValueError:
-            return jsonify({'error': 'Цена должна быть числом'}), 400
-        
-        try:
-            product = db_manager.update_product_price(
-                product_id=product_id,
-                seller_id=current_account.id,
-                new_price=new_price
-            )
-            
-            return jsonify(product.to_dict_for_creator())
+            product = db_manager.buy_product(current_account.id, product_id)
+            return jsonify(product.to_dict_for_owner()), 200
             
         except ValueError as e:
             return jsonify({'error': str(e)}), 400
         except Exception as e:
-            return jsonify({'error': 'Ошибка изменения цены'}), 500
+            return jsonify({'error': 'Ошибка покупки товара'}), 500
     
-    # 9. Подписка на товар
-    @app.route('/api/products/<product_id>/subscribe', methods=['POST'])
-    @token_required
-    def subscribe_to_product(current_account, product_id):
-        try:
-            result = db_manager.subscribe_to_product(current_account.id, product_id)
-            return jsonify(result)
-            
-        except ValueError as e:
-            return jsonify({'error': str(e)}), 400
-        except Exception as e:
-            return jsonify({'error': 'Ошибка подписки'}), 500
-    
-    # 10. Отписка от товара
-    @app.route('/api/products/<product_id>/unsubscribe', methods=['POST'])
-    @token_required
-    def unsubscribe_from_product(current_account, product_id):
-        try:
-            result = db_manager.unsubscribe_from_product(current_account.id, product_id)
-            return jsonify(result)
-            
-        except ValueError as e:
-            return jsonify({'error': str(e)}), 400
-        except Exception as e:
-            return jsonify({'error': 'Ошибка отписки'}), 500
-    
-    # 11. Снятие товара с продажи
+    # 10. Снятие товара с продажи (удаление)
     @app.route('/api/products/<product_id>/remove', methods=['POST'])
     @token_required
-    def remove_product_from_sale(current_account, product_id):
+    def remove_product(current_account, product_id):
         try:
             result = db_manager.remove_product(product_id, current_account.id)
-            return jsonify(result)
+            return jsonify(result), 200
         except ValueError as e:
             return jsonify({'error': str(e)}), 400
         except Exception as e:
-            return jsonify({'error': 'Ошибка снятия товара'}), 500
+            return jsonify({'error': 'Ошибка удаления товара'}), 500
     
-    # 13. Поиск товаров
+    # 11. Поиск товаров
     @app.route('/api/products/search', methods=['GET'])
     def search_products():
         search_term = request.args.get('q', '').strip()
@@ -603,8 +493,8 @@ def create_app():
             return jsonify({'error': 'Минимальный порог должен быть от 0 до 1'}), 400
         
         try:
-            # Поиск всегда возвращает только активные товары
-            products = db_manager.get_all_products(is_active=True)
+            # Поиск всегда возвращает только непроданные товары
+            products = db_manager.get_all_active_products()
             
             if not products:
                 return jsonify({
@@ -642,9 +532,10 @@ def create_app():
             # Форматируем результаты
             formatted_results = []
             for product, score in paginated_results:
-                product_dict = product.to_dict_public(show_is_active=False)
-                product_dict['relevance_score'] = round(score, 3)
-                formatted_results.append(product_dict)
+                product_dict = product.to_dict_public()
+                if product_dict:
+                    product_dict['relevance_score'] = round(score, 3)
+                    formatted_results.append(product_dict)
             
             return jsonify({
                 'results': formatted_results,
@@ -660,65 +551,132 @@ def create_app():
             app.logger.error(f"Search error: {str(e)}")
             return jsonify({'error': 'Ошибка поиска'}), 500
     
-    # 14. Получение изображения
-    @app.route('/api/images/thumbnail/<file_id>')
-    def serve_thumbnail_image(file_id):
+    # 12. Оригинальное изображение (только для владельца)
+    @app.route('/api/images/original/<file_id>')
+    def serve_original_image(file_id):
+        # Проверяем токен
+        token = None
+        auth_header = request.headers.get('Authorization')
+        if auth_header and auth_header.startswith('Bearer '):
+            token = auth_header.split(' ')[1]
+        
+        if not token:
+            return jsonify({'error': 'Изображение не найдено'}), 404
+        
         try:
-            product = db_manager.get_product_by_photo_url(file_id)
-            if not product or not product.is_active:
-                return jsonify({'error': 'Товар не найден'}), 404
+            payload = jwt_manager.decode_token(token)
+            user_id = payload.get('sub')
+            account = db_manager.get_account_by_id(user_id)
             
-            # Пытаемся найти файл
+            if not account:
+                return jsonify({'error': 'Изображение не найдено'}), 404
+            
+            # Находим товар по photo_url
+            product = db_manager.get_product_by_photo_url(file_id)
+            if not product:
+                return jsonify({'error': 'Изображение не найдено'}), 404
+            
+            # Проверяем права: только создатель или владелец
+            is_creator = product.creator_id == account.id
+            is_owner = product.owner_id == account.id
+            
+            if not (is_creator or is_owner):
+                return jsonify({'error': 'Изображение не найдено'}), 404
+            
+            # Ищем файл
             for ext in ['jpeg', 'jpg', 'png', 'gif', 'webp', 'bmp', 'tiff']:
-                thumbnail_path = os.path.join(
-                    app.config['UPLOAD_FOLDER'], 
-                    'thumbnails', 
-                    f"{file_id}_thumbnail.{ext}"
-                )
-                if os.path.exists(thumbnail_path):
-                    return send_file(thumbnail_path)
+                original_path = os.path.join(ServerConfig.ORIGINALS_FOLDER, f"{file_id}.{ext}")
+                if os.path.exists(original_path):
+                    return send_file(original_path)
             
             return jsonify({'error': 'Изображение не найдено'}), 404
             
         except Exception as e:
-            return jsonify({'error': 'Ошибка загрузки изображения'}), 404
+            return jsonify({'error': 'Изображение не найдено'}), 404
     
-    # 15. Получение подписок пользователя
-    @app.route('/api/account/subscriptions', methods=['GET'])
+    # 13. Изображение с водяным знаком (для всех, только непроданные товары)
+    @app.route('/api/images/watermarked/<file_id>')
+    def serve_watermarked_image(file_id):
+        try:
+            # Находим товар по photo_url
+            product = db_manager.get_product_by_photo_url(file_id)
+            
+            # Если товар не существует или продан - 404
+            if not product or product.is_sold:
+                return jsonify({'error': 'Изображение не найдено'}), 404
+            
+            # Ищем файл с водяным знаком
+            for ext in ['jpeg', 'jpg', 'png', 'gif', 'webp', 'bmp', 'tiff']:
+                watermarked_path = os.path.join(ServerConfig.WATERMARKED_FOLDER, f"{file_id}.{ext}")
+                if os.path.exists(watermarked_path):
+                    return send_file(watermarked_path)
+            
+            return jsonify({'error': 'Изображение не найдено'}), 404
+            
+        except Exception as e:
+            return jsonify({'error': 'Изображение не найдено'}), 404
+    
+    # 14. Мои покупки
+    @app.route('/api/account/purchases', methods=['GET'])
     @token_required
-    def get_user_subscriptions(current_account):
-        is_active = get_is_active_param()
+    def get_user_purchases(current_account):
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
         
-        subscriptions = db_manager.get_user_subscriptions(
-            current_account.id, 
-            is_active=is_active
-        )
-        
-        # Фильтруем по активности товара
-        filtered_subscriptions = []
-        for subscription in subscriptions:
-            product = db_manager.get_product(subscription.product_id)
-            if product and product.is_active == is_active:
-                sub_data = subscription.to_dict()
-                filtered_subscriptions.append(sub_data)
-        
-        return jsonify({
-            'data': filtered_subscriptions
-        })
+        try:
+            result = db_manager.get_user_purchases(current_account.id, page, per_page)
+            return jsonify(result)
+        except Exception as e:
+            return jsonify({'error': 'Ошибка получения истории покупок'}), 500
     
-    # 16. Объявление банкротства
+    # 15. Мои продажи
+    @app.route('/api/account/sales', methods=['GET'])
+    @token_required
+    def get_user_sales(current_account):
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+        
+        try:
+            result = db_manager.get_user_sales(current_account.id, page, per_page)
+            return jsonify(result)
+        except Exception as e:
+            return jsonify({'error': 'Ошибка получения истории продаж'}), 500
+    
+    # 16. Статистика профиля
+    @app.route('/api/account/stats', methods=['GET'])
+    @token_required
+    def get_account_stats(current_account):
+        try:
+            stats = db_manager.get_account_stats(current_account.id)
+            return jsonify(stats)
+        except Exception as e:
+            return jsonify({'error': 'Ошибка получения статистики'}), 500
+    
+    # 17. Ежедневный бонус
+    @app.route('/api/account/daily-bonus', methods=['POST'])
+    @token_required
+    def claim_daily_bonus(current_account):
+        try:
+            result = db_manager.claim_daily_bonus(current_account.id)
+            return jsonify(result)
+        except ValueError as e:
+            return jsonify({'error': str(e)}), 400
+        except Exception as e:
+            return jsonify({'error': 'Ошибка начисления бонуса'}), 500
+    
+    # 18. Банкротство
     @app.route('/api/account/bankruptcy', methods=['POST'])
     @token_required
     def declare_bankruptcy(current_account):
         try:
             result = db_manager.declare_bankruptcy(current_account.id)
             return jsonify(result)
-            
         except ValueError as e:
             return jsonify({'error': str(e)}), 400
         except Exception as e:
             return jsonify({'error': 'Ошибка объявления банкротства'}), 500
     
+    # 19. Рейтинг игроков
     @app.route('/api/players/rating', methods=['GET'])
     def get_player_rating():
         """Получает рейтинг игроков по балансу (сортировка по убыванию)"""

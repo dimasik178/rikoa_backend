@@ -1,10 +1,16 @@
-from models import db, Account, Product, Subscription
+from models import db, Account, Product, Purchase
 from flask import Flask
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy import desc, and_
 from werkzeug.security import generate_password_hash, check_password_hash
 from config import MarketConfig
-from datetime import datetime
+from datetime import datetime, timezone
+import json
+from decimal import Decimal
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class TransactionManager:
     """Управление транзакциями и блокировками"""
@@ -23,6 +29,7 @@ class TransactionManager:
             db.session.rollback()
             raise e
 
+
 class BankruptcyManager:
     """Управление банкротством"""
 
@@ -30,23 +37,21 @@ class BankruptcyManager:
     def check_bankruptcy_conditions(account: Account) -> tuple[bool, str]:
         """Проверяет условия для объявления банкротства"""
         
-        # 1. Проверяем флаг cooldown
+        # 1. Проверяем флаг cooldown (можно банкротиться только 1 раз в день)
         if not account.can_declare_bankruptcy:
-            return False, "Банкротство можно объявлять только 1 раз до следующего обновления цен."
+            return False, "Банкротство можно объявлять только 1 раз в день."
         
         # 2. Проверяем баланс (должен быть меньше BANKRUPTCY_RESET_BALANCE)
         if account.balance >= MarketConfig.BANKRUPTCY_RESET_BALANCE:
             return False, f"Нельзя объявить банкротство при балансе ≥ {MarketConfig.BANKRUPTCY_RESET_BALANCE} AC"
         
-        # 3. Проверяем активные товары
-        active_products = [p for p in account.products if p.is_active]
+        # 3. Проверяем активные товары на продаже
+        active_products = [p for p in account.products_for_sale if not p.is_sold]
         if active_products:
-            return False, "Нельзя объявить банкротство с активными товарами. Cначала снимите товары с продажи."
+            return False, "Нельзя объявить банкротство с активными товарами на продаже. Сначала снимите товары с продажи."
         
-        # 4. Проверяем активные подписки
-        active_subscriptions = [s for s in account.subscriptions if s.is_active]
-        if active_subscriptions:
-            return False, "Нельзя объявить банкротство с активными подписками. Cначала отпишитесь от товаров."
+        # 4. Проверяем купленные товары - они не мешают банкротству
+        # (у пользователя могут быть купленные товары, это не блокирует банкротство)
         
         return True, ""
 
@@ -71,7 +76,7 @@ class BankruptcyManager:
             # Обновляем дату последнего банкротства
             account.last_bankruptcy = datetime.utcnow()
             
-            # Запрещаем повторное банкротство до следующего обновления цен
+            # Запрещаем повторное банкротство до следующего дня
             account.can_declare_bankruptcy = False
             
             db.session.commit()
@@ -91,7 +96,7 @@ class BankruptcyManager:
     
     @staticmethod
     def reset_bankruptcy_cooldown_for_all():
-        """Сбрасывает cooldown банкротства для всех пользователей (вызывается при обновлении цен)"""
+        """Сбрасывает cooldown банкротства для всех пользователей (вызывается раз в день)"""
         try:
             # Устанавливаем can_declare_bankruptcy = True для всех пользователей
             Account.query.update({Account.can_declare_bankruptcy: True})
@@ -102,7 +107,7 @@ class BankruptcyManager:
             raise e
 
 class ProductManager:
-    """Управление товарами и портфелем"""
+    """Управление товарами"""
     
     @staticmethod
     def validate_price(price):
@@ -119,16 +124,33 @@ class ProductManager:
         return price
     
     @staticmethod
-    def calculate_startup_capital(price):
-        """Рассчитывает стартовый капитал продавца"""
-        return price * MarketConfig.SELLER_STARTUP_MULTIPLIER
+    def calculate_commission(price: int) -> tuple[int, int]:
+        """
+        Рассчитывает комиссию и сумму продавцу
+        Возвращает: (commission, seller_gets)
+        
+        Использует Decimal для точного округления вверх:
+        commission = ceil(price * 0.05)
+        """
+        # Используем Decimal для точных вычислений
+        price_dec = Decimal(str(price))
+        commission_percent = Decimal(str(MarketConfig.COMMISSION_PERCENT))
+        
+        # commission = ceil(price * 0.05)
+        commission_raw = price_dec * commission_percent
+        # Округление вверх: -(-commission_raw // 1)
+        commission = -(-commission_raw // Decimal('1'))
+        
+        seller_gets = price_dec - commission
+        
+        return int(commission), int(seller_gets)
     
     @staticmethod
     def check_seller_limit(account_id):
-        """Проверяет лимит активных товаров продавца"""
+        """Проверяет лимит активных товаров продавца (непроданных)"""
         active_count = Product.query.filter_by(
             creator_id=account_id, 
-            is_active=True
+            is_sold=False
         ).count()
         
         if active_count >= MarketConfig.MAX_ACTIVE_PRODUCTS_PER_SELLER:
@@ -136,49 +158,58 @@ class ProductManager:
         
         return True
 
-class SubscriptionManager:
-    """Управление подписками"""
+
+class BonusManager:
+    """Управление бонусами"""
     
     @staticmethod
-    def subscribe_user(account_id, product_id, current_price):
-        """Оформляет подписку пользователя на товар"""
-        # Проверяем существующую активную подписку
-        existing = Subscription.query.filter_by(
-            subscriber_id=account_id,
-            product_id=product_id,
-            is_active=True
-        ).first()
+    def can_claim_daily_bonus(account: Account) -> tuple[bool, str]:
+        """Проверяет, может ли пользователь получить ежедневный бонус"""
         
-        if existing:
-            return existing
+        # Проверяем баланс
+        if account.balance >= MarketConfig.DAILY_BONUS_MAX_BALANCE:
+            return False, f"Баланс превышает лимит для получения бонуса ({MarketConfig.DAILY_BONUS_MAX_BALANCE} AC)"
         
-        # Создаем новую подписку
-        subscription = Subscription(
-            subscriber_id=account_id,
-            product_id=product_id,
-            subscription_price=current_price,
-            is_active=True
-        )
+        # Проверяем, получал ли бонус сегодня
+        if account.last_daily_bonus:
+            # Сравниваем даты (без времени)
+            last_bonus_date = account.last_daily_bonus.date()
+            today = datetime.utcnow().date()
+            
+            if last_bonus_date == today:
+                return False, "Сегодня бонус уже получен"
         
-        db.session.add(subscription)
-        return subscription
+        return True, ""
     
     @staticmethod
-    def unsubscribe_user(subscription, current_price, portfolio):
-        """Отписывает пользователя от товара"""
-        # Проверяем, достаточно ли денег в портфеле
-        if portfolio < current_price:
-            # Прогорание товара
-            payout_amount = portfolio
-            is_burned = True
-        else:
-            payout_amount = current_price
-            is_burned = False
+    def claim_daily_bonus(account: Account) -> dict:
+        """Начисляет ежедневный бонус"""
         
-        # Деактивируем подписку
-        subscription.is_active = False
+        can_claim, message = BonusManager.can_claim_daily_bonus(account)
+        if not can_claim:
+            raise ValueError(message)
         
-        return payout_amount, is_burned
+        try:
+            old_balance = account.balance
+            bonus = MarketConfig.DAILY_BONUS_AMOUNT
+            
+            # Начисляем бонус
+            account.balance += bonus
+            account.total_earned += bonus
+            account.last_daily_bonus = datetime.utcnow()
+            
+            db.session.commit()
+            
+            return {
+                'message': 'Бонус начислен',
+                'bonus': bonus,
+                'new_balance': account.balance
+            }
+            
+        except Exception as e:
+            db.session.rollback()
+            raise ValueError(f"Ошибка начисления бонуса: {str(e)}")
+
 
 class DatabaseManager:
     def __init__(self, app: Flask = None):
@@ -193,9 +224,23 @@ class DatabaseManager:
     # ========== АККАУНТЫ ==========
     
     def create_account(self, nickname: str, mail: str, password: str) -> Account:
-        """Создает новый аккаунт"""
+        """Создает новый аккаунт с бонусом за регистрацию"""
         password_hash = generate_password_hash(password)
-        account = Account(nickname=nickname, mail=mail, password=password_hash)
+        
+        # Начальный баланс = стартовый + бонус
+        initial_balance = MarketConfig.STARTING_BALANCE + MarketConfig.REGISTRATION_BONUS
+        
+        account = Account(
+            nickname=nickname, 
+            mail=mail, 
+            password=password_hash,
+            balance=initial_balance,
+            total_earned=MarketConfig.REGISTRATION_BONUS
+        )
+        
+        # Инициализируем историю баланса
+        history = [initial_balance] * MarketConfig.BALANCE_HISTORY_DAYS
+        account.balance_history = json.dumps(history)
         
         db.session.add(account)
         try:
@@ -230,11 +275,21 @@ class DatabaseManager:
         
         return BankruptcyManager.declare_bankruptcy(account)
     
+    # ========== БОНУСЫ ==========
+    
+    def claim_daily_bonus(self, account_id: str) -> dict:
+        """Начисляет ежедневный бонус пользователю"""
+        account = self.get_account_by_id(account_id)
+        if not account:
+            raise ValueError("Пользователь не найден")
+        
+        return BonusManager.claim_daily_bonus(account)
+    
     # ========== ТОВАРЫ ==========
     
     def create_product(self, creator_id: str, title: str, price: int, 
                       description: str, photo_url: str) -> Product:
-        """Создает новый товар"""
+        """Создает новый товар (без списания средств)"""
         # Валидация цены
         price = ProductManager.validate_price(price)
         
@@ -246,28 +301,24 @@ class DatabaseManager:
         # Проверяем лимит товаров
         ProductManager.check_seller_limit(creator_id)
         
-        # Рассчитываем стартовый капитал
-        startup_capital = ProductManager.calculate_startup_capital(price)
+        # Валидация длины
+        if len(title) < MarketConfig.MIN_TITLE_LENGTH:
+            raise ValueError(f"Название должно быть не менее {MarketConfig.MIN_TITLE_LENGTH} символов")
+        if len(title) > MarketConfig.MAX_TITLE_LENGTH:
+            raise ValueError(f"Название должно быть не более {MarketConfig.MAX_TITLE_LENGTH} символов")
+        if len(description) > MarketConfig.MAX_DESCRIPTION_LENGTH:
+            raise ValueError(f"Описание должно быть не более {MarketConfig.MAX_DESCRIPTION_LENGTH} символов")
         
-        # Проверяем баланс продавца
-        if creator.balance < startup_capital:
-            raise ValueError(f"Недостаточно средств. Нужно: {startup_capital} AC, ваш баланс: {creator.balance} AC")
-        
-        # Создаем товар
+        # Создаем товар (деньги не списываются!)
         product = Product(
             creator_id=creator_id,
+            owner_id=creator_id,  # Изначально владелец = создатель
             title=title,
-            current_price=price,
-            next_day_price=price,
+            price=price,
             description=description,
             photo_url=photo_url,
-            startup_capital=startup_capital,
-            portfolio=startup_capital,  # Начальный портфель = стартовый капитал
-            is_active=True
+            is_sold=False
         )
-        
-        # Списываем стартовый капитал с баланса продавца
-        creator.balance -= startup_capital
         
         db.session.add(product)
         db.session.commit()
@@ -278,274 +329,179 @@ class DatabaseManager:
         """Получает товар по ID"""
         return Product.query.get(product_id)
     
-    def get_products_paginated(self, page: int = 1, per_page: int = 14, is_active: bool = True):
-        """Получает товары с пагинацией с фильтрацией по is_active"""
-        return Product.query.filter_by(is_active=is_active).order_by(
+    def get_product_by_photo_url(self, file_id: str) -> Product:
+        """Получает товар по photo_url (file_id)"""
+        return Product.query.filter_by(photo_url=file_id).first()
+    
+    def get_products_paginated(self, page: int = 1, per_page: int = 14):
+        """Получает непроданные товары с пагинацией"""
+        return Product.query.filter_by(is_sold=False).order_by(
             desc(Product.created_at)
         ).paginate(page=page, per_page=per_page, error_out=False)
     
-    def get_user_products(self, account_id: str, is_active: bool = True):
-        """Получает товары пользователя с фильтрацией по is_active"""
-        return Product.query.filter_by(creator_id=account_id, is_active=is_active).order_by(
-            desc(Product.created_at)
-        ).all()
+    def get_user_products_for_sale(self, account_id: str):
+        """Получает товары пользователя на продаже (непроданные)"""
+        return Product.query.filter_by(
+            creator_id=account_id, 
+            is_sold=False
+        ).order_by(desc(Product.created_at)).all()
     
-    def update_product_price(self, product_id: str, seller_id: str, new_price: int) -> Product:
-        """Изменяет цену товара (устанавливает на следующий день)"""
-        # Валидация цены
-        new_price = ProductManager.validate_price(new_price)
+    def get_user_purchased_products(self, account_id: str):
+        """Получает купленные пользователем товары"""
+        return Product.query.filter_by(
+            owner_id=account_id, 
+            is_sold=True
+        ).order_by(desc(Product.purchased_at)).all()
+    
+    def buy_product(self, buyer_id: str, product_id: str) -> Product:
+        """Покупка товара"""
         
         # Получаем товар
         product = self.get_product(product_id)
         if not product:
             raise ValueError("Товар не найден")
         
-        # Проверяем права продавца
-        if product.creator_id != seller_id:
-            raise ValueError("Только владелец может изменять цену товара")
+        # Проверяем, что товар не продан
+        if product.is_sold:
+            raise ValueError("Товар уже продан")
         
-        # Проверяем, что товар активен
-        if not product.is_active:
-            raise ValueError("Нельзя изменить цену неактивного товара")
+        # Получаем покупателя и продавца
+        buyer = self.get_account_by_id(buyer_id)
+        seller = self.get_account_by_id(product.creator_id)
         
-        # Проверяем, что новая цена не превышает портфель
-        if new_price > product.portfolio:
-            raise ValueError(f"Цена не может превышать портфель ({product.portfolio} AC)")
-        
-        # Устанавливаем цену на следующий день
-        product.next_day_price = new_price
-        
-        db.session.commit()
-        return product
-    
-    def remove_product(self, product_id: str, seller_id: str):
-        """Снимает товар с продажи или скрывает неактивный товар"""
-        product = self.get_product(product_id)
-        if not product:
-            raise ValueError("Товар не найден")
-        
-        if product.creator_id != seller_id:
-            raise ValueError("Только владелец может снять/скрыть товар")
-        
-        seller = self.get_account_by_id(seller_id)
-        try:
-            # СЛУЧАЙ 1: Активный товар
-            if product.is_active:
-                # 1. Продавец забирает ВЕСЬ портфель
-                seller.balance += product.portfolio
-                
-                # 2. Все активные подписки становятся неактивными
-                active_subscriptions = Subscription.query.filter_by(
-                    product_id=product_id,
-                    is_active=True
-                ).all()
-                
-                if not active_subscriptions:
-                    portfolio = product.portfolio
-                    db.session.delete(product)
-                    db.session.commit()
-                    return {
-                        'message': f'Товар снят с продажи. Получено: {portfolio} AC',
-                        'portfolio_transferred': portfolio,
-                        'subscriptions_cancelled': 0,
-                        'product_deleted': True,
-                    }
-
-                subscription_ids = [sub.id for sub in active_subscriptions]
-
-                for subscription in active_subscriptions:
-                    subscription.is_active = False
-
-                # 3. Товар становится неактивным
-                product.is_active = False
-                portfolio = product.portfolio
-                product.portfolio = 0
-                
-                db.session.commit()
-                
-                return {
-                    'message': f'Товар снят с продажи. Получено: {portfolio} AC',
-                    'portfolio_transferred': portfolio,
-                    'subscriptions_cancelled': len(active_subscriptions),
-                    'subscription_ids_deleted': subscription_ids,
-                    'product_is_active': False
-                }
-
-            # СЛУЧАЙ 2: Неактивный товар
-            elif not product.is_active:
-                # Проверяем, нужно ли удалять товар полностью
-                # (если нет активных подписок)
-                remaining_subs = Subscription.query.filter_by(
-                    product_id=product_id,
-                    is_active=True
-                ).all()
-
-                if not remaining_subs:
-                    db.session.delete(product)
-                    db.session.commit()
-                    return {
-                        'message': 'Товар удален (не осталось активных подписчиков)',
-                        'portfolio_transferred': 0,
-                        'product_deleted': True
-                    }
-                
-                return {
-                    'message': 'Товар уже неактивен',
-                    'portfolio_transferred': 0,
-                    'product_deleted': False
-                }
-                
-        except Exception as e:
-            db.session.rollback()
-            raise ValueError(f'Ошибка: {str(e)}')
-    
-    # ========== ПОДПИСКИ ==========
-    
-    def subscribe_to_product(self, account_id: str, product_id: str):
-        """Подписка пользователя на товар"""
-        # Получаем товар
-        product = self.get_product(product_id)
-        if not product or not product.is_active:
-            raise ValueError("Товар не найден или неактивен")
-        
-        # Проверяем, что пользователь не продавец
-        if product.creator_id == account_id:
-            raise ValueError("Нельзя подписаться на свой товар")
-        
-        # Получаем пользователя
-        user = self.get_account_by_id(account_id)
-        if not user:
+        if not buyer or not seller:
             raise ValueError("Пользователь не найден")
         
-        # Проверяем баланс
-        if user.balance < product.current_price:
-            raise ValueError(f"Недостаточно средств. Нужно: {product.current_price} AC, ваш баланс: {user.balance} AC")
+        # Проверяем, что покупатель не продавец
+        if buyer_id == product.creator_id:
+            raise ValueError("Нельзя купить свой товар")
+        
+        # Проверяем баланс покупателя
+        if buyer.balance < product.price:
+            raise ValueError(f"Недостаточно средств. Нужно: {product.price} AC, ваш баланс: {buyer.balance} AC")
+        
+        # Рассчитываем комиссию
+        commission, seller_gets = ProductManager.calculate_commission(product.price)
         
         # Выполняем транзакцию
         def transaction():
-            # Списываем деньги с баланса пользователя
-            user.balance -= product.current_price
+            # 1. Списываем деньги с покупателя
+            buyer.balance -= product.price
+            buyer.total_spent += product.price
             
-            # Добавляем деньги в портфель товара
-            product.portfolio += product.current_price
-            product.subscriptions_money += product.current_price
-            product.subscribers_count += 1
+            # 2. Начисляем деньги продавцу (минус комиссия)
+            seller.balance += seller_gets
+            seller.total_earned += seller_gets
             
-            # Создаем подписку
-            subscription = SubscriptionManager.subscribe_user(
-                account_id, product_id, product.current_price
-            )
+            # 3. Обновляем товар
+            product.owner_id = buyer_id
+            product.is_sold = True
+            product.purchased_at = datetime.utcnow()
             
-            return subscription
-        
-        subscription = TransactionManager.execute_transaction(transaction)
-        
-        return {
-            'subscription': subscription.to_dict(),
-            'message': f'Подписка оформлена за {product.current_price} AC'
-        }
-    
-    def unsubscribe_from_product(self, account_id: str, product_id: str):
-        """Отписка пользователя от товара"""
-        # Находим активную подписку
-        subscription = Subscription.query.filter_by(
-            subscriber_id=account_id,
-            product_id=product_id,
-            is_active=True
-        ).first()
-        
-        if not subscription:
-            raise ValueError("Активная подписка не найдена")
-        
-        product : Product
-        product = subscription.product
-        
-        # СЛУЧАЙ 1: Товар активен - обычная отписка с выплатой
-        if product.is_active:
-            def transaction():
-                # Проверяем, хватит ли денег в портфеле
-                payout_amount = product.current_price
-                is_burned = False
-                
-                if product.portfolio < product.current_price:
-                    # Товар прогорает!
-                    payout_amount = product.portfolio
-                    is_burned = True
-                    
-                    # Деактивируем ВСЕ подписки этого товара
-                    all_subscriptions = Subscription.query.filter_by(
-                        product_id=product_id,
-                        is_active=True
-                    ).all()
-                    for sub in all_subscriptions:
-                        sub.is_active = False
-                    
-                    # Деактивируем товар
-                    product.is_active = False
-                    product.portfolio = 0
-                    product.subscriptions_money -= payout_amount
-                    product.subscribers_count -= 1
-                else:
-                    # Обычная отписка - деактивируем подписку
-                    subscription.is_active = False
-                    product.portfolio -= payout_amount
-                    product.subscriptions_money -= payout_amount
-                    product.subscribers_count -= 1
-                
-                # Выплачиваем пользователю
-                user = self.get_account_by_id(account_id)
-                user.balance += payout_amount
-                
-                return {
-                    'payout_amount': payout_amount,
-                    'is_burned': is_burned,
-                    'product_is_active': product.is_active
-                }
-            
-            result = TransactionManager.execute_transaction(transaction)
-            
-            response = {
-                'message': f'Отписка выполнена. Выплачено: {result["payout_amount"]} AC',
-                'payout_amount': result['payout_amount']
-            }
-            
-            if result['is_burned']:
-                response['warning'] = 'Товар прогорел из-за недостатка средств в портфеле'
-            
-            return response
-        
-        # СЛУЧАЙ 2: Товар неактивен - просто деактивируем подписку
-        elif not product.is_active:
-            # Просто деактивируем подписку (денег не возвращаем)
-            subscription.is_active = False
-            
-            # Проверяем, нужно ли удалять товар полностью
-            # (если нет активных подписчиков)
-            remaining_subs = Subscription.query.filter_by(
+            # 4. Создаем запись о покупке
+            purchase = Purchase(
+                buyer_id=buyer_id,
+                seller_id=product.creator_id,
                 product_id=product_id,
-                is_active=True
-            ).count()
+                product_title=product.title,
+                price=product.price,
+                commission=commission
+            )
+            db.session.add(purchase)
             
-            if remaining_subs == 0:
-                # Полностью удаляем товар из БД
-                db.session.delete(product)
-            
+            return product
+        
+        product = TransactionManager.execute_transaction(transaction)
+        
+        return product
+    
+    def remove_product(self, product_id: str, seller_id: str):
+        """Удаляет товар (только если не продан)"""
+        product = self.get_product(product_id)
+        if not product:
+            raise ValueError("Товар не найден")
+        
+        # Проверяем права
+        if product.creator_id != seller_id:
+            raise ValueError("Только владелец может удалить товар")
+        
+        # Проверяем, что товар не продан
+        if product.is_sold:
+            raise ValueError("Нельзя удалить проданный товар")
+        
+        try:
+            # Полностью удаляем товар из БД
+            db.session.delete(product)
             db.session.commit()
             
             return {
-                'message': 'Отписка от неактивного товара выполнена',
-                'payout_amount': 0,
-                'product_deleted': not Product.query.get(product_id)
+                'message': 'Товар удален',
+                'product_id': product_id
             }
+            
+        except Exception as e:
+            db.session.rollback()
+            raise ValueError(f'Ошибка удаления товара: {str(e)}')
     
-    def get_user_subscriptions(self, account_id: str, is_active: bool = True):
-        """Получает подписки пользователя с фильтрацией по is_active"""
-        return Subscription.query.filter_by(
-            subscriber_id=account_id,
-            is_active=is_active
-        ).order_by(desc(Subscription.id)).all()
+    # ========== ИСТОРИЯ ПОКУПОК/ПРОДАЖ ==========
     
-    # ========== РЕЙТИНГ ИГРОКОВ ==========
+    def get_user_purchases(self, account_id: str, page: int = 1, per_page: int = 20):
+        """Получает историю покупок пользователя с пагинацией"""
+        pagination = Purchase.query.filter_by(
+            buyer_id=account_id
+        ).order_by(desc(Purchase.purchased_at)).paginate(
+            page=page, per_page=per_page, error_out=False
+        )
+        
+        purchases_data = [purchase.to_dict_for_buyer() for purchase in pagination.items]
+        
+        return {
+            'data': purchases_data,
+            'pagination': {
+                'page': page,
+                'per_page': per_page,
+                'total': pagination.total,
+                'pages': pagination.pages
+            }
+        }
+    
+    def get_user_sales(self, account_id: str, page: int = 1, per_page: int = 20):
+        """Получает историю продаж пользователя с пагинацией"""
+        pagination = Purchase.query.filter_by(
+            seller_id=account_id
+        ).order_by(desc(Purchase.purchased_at)).paginate(
+            page=page, per_page=per_page, error_out=False
+        )
+        
+        sales_data = [purchase.to_dict_for_seller() for purchase in pagination.items]
+        
+        return {
+            'data': sales_data,
+            'pagination': {
+                'page': page,
+                'per_page': per_page,
+                'total': pagination.total,
+                'pages': pagination.pages
+            }
+        }
+    
+    # ========== СТАТИСТИКА ==========
+    
+    def get_account_stats(self, account_id: str) -> dict:
+        """Получает статистику аккаунта"""
+        account = self.get_account_by_id(account_id)
+        if not account:
+            raise ValueError("Пользователь не найден")
+        
+        return {
+            'balance_history': account.get_balance_history_array(),
+            'total_spent': account.total_spent,
+            'total_earned': account.total_earned,
+            'current_balance': account.balance,
+            'bankruptcy_count': account.bankruptcy_count
+        }
+    
+    # ========== РЕЙТИНГ ==========
     
     def get_player_rating_paginated(self, page: int = 1, per_page: int = 20):
         """Получает рейтинг игроков по балансу с пагинацией"""
@@ -553,7 +509,6 @@ class DatabaseManager:
         
         players_data = []
         for account in pagination.items:
-            # Форматируем данные для рейтинга
             player_data = {
                 'id': account.id,
                 'nickname': account.nickname,
@@ -572,27 +527,25 @@ class DatabaseManager:
                 'pages': pagination.pages
             }
         }
-
-    # ========== ПОИСК ==========
-    
-    def get_all_products(self, is_active: bool = True):
-        """Получает все товары с фильтрацией по is_active"""
-        return Product.query.filter_by(is_active=is_active).all()
-    
-    def get_product_by_photo_url(self, file_id: str) -> Product:
-        """Получает товар по photo_url (file_id)"""
-        return Product.query.filter_by(photo_url=file_id).first()
     
     # ========== СИСТЕМНЫЕ ==========
     
-    def get_daily_update_products(self):
-        """Получает активные товары для ежедневного обновления"""
-        return Product.query.filter_by(is_active=True).all()
+    def get_all_active_products(self):
+        """Получает все активные (непроданные) товары"""
+        return Product.query.filter_by(is_sold=False).all()
     
-    def update_product_price_history(self, product: Product):
-        """Обновляет историю цен товара (для ежедневного обновления)"""
-        product.update_price_history()
+    def update_all_balance_histories(self):
+        """Обновляет историю баланса для всех пользователей"""
+        accounts = Account.query.all()
+        for account in accounts:
+            account.update_balance_history()
         db.session.commit()
+        return len(accounts)
+    
+    def reset_all_bankruptcy_cooldowns(self):
+        """Сбрасывает cooldown банкротства для всех пользователей"""
+        return BankruptcyManager.reset_bankruptcy_cooldown_for_all()
+
 
 # Глобальный экземпляр менеджера БД
 db_manager = DatabaseManager()

@@ -4,7 +4,13 @@ import uuid
 from PIL import Image
 from web_server import create_app
 from database import db_manager
-from config import NUM_USERS, NUM_PRODUCTS, PURCHASE_PERCENTAGE, MarketConfig
+from config import SeedConfig, MarketConfig
+# SeedConfig.NUM_USERS, SeedConfig.NUM_PRODUCTS, SeedConfig.PURCHASE_PERCENTAGE
+from watermark import add_watermark
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class SimpleFile:
     """Имитация файла для обработки изображений"""
@@ -32,13 +38,13 @@ class SimpleFile:
         if self._file:
             self._file.close()
 
-def process_uploaded_image_for_seed(file):
-    """Упрощенная обработка изображения для сидинга (отдельная от web_server)"""
+
+def process_uploaded_image_for_seed(file, originals_folder, watermarked_folder):
+    """Упрощенная обработка изображения для сидинга"""
     try:
-        # Определяем путь для загрузок
-        upload_folder = 'uploads'
-        os.makedirs(upload_folder, exist_ok=True)
-        os.makedirs(os.path.join(upload_folder, 'thumbnails'), exist_ok=True)
+        # Создаем папки если их нет
+        os.makedirs(originals_folder, exist_ok=True)
+        os.makedirs(watermarked_folder, exist_ok=True)
         
         file.seek(0, os.SEEK_END)
         file_size = file.tell()
@@ -60,32 +66,35 @@ def process_uploaded_image_for_seed(file):
         file_id = str(uuid.uuid4())
         original_extension = image.format.lower()
         
-        # Создаем превью
-        thumbnail_size = (800, 800)
-        thumbnail_filename = f"{file_id}_thumbnail.{original_extension}"
-        thumbnail_path = os.path.join(upload_folder, 'thumbnails', thumbnail_filename)
-        
-        # Сохраняем превью
-        image.thumbnail(thumbnail_size, Image.Resampling.LANCZOS)
+        # Сохраняем оригинал
+        original_filename = f"{file_id}.{original_extension}"
+        original_path = os.path.join(originals_folder, original_filename)
         
         if image.format == 'PNG':
-            image.save(thumbnail_path, optimize=True)
+            image.save(original_path, optimize=True)
         else:
             if image.mode in ('RGBA', 'LA', 'P'):
                 background = Image.new('RGB', image.size, (255, 255, 255))
                 background.paste(image, mask=image.split()[-1] if image.mode == 'RGBA' else None)
                 image = background
-            image.save(thumbnail_path, optimize=True, quality=85)
+            image.save(original_path, optimize=True, quality=85)
+        
+        # Создаем копию с водяным знаком
+        watermarked_path = os.path.join(watermarked_folder, original_filename)
+        if not add_watermark(original_path, watermarked_path):
+            return None, "Ошибка добавления водяного знака"
         
         image.close()
         
         return {
-            'thumbnail': thumbnail_filename,
-            'file_id': file_id
+            'file_id': file_id,
+            'original_path': original_path,
+            'watermarked_path': watermarked_path
         }, None
         
     except Exception as e:
         return None, f"Ошибка обработки изображения: {str(e)}"
+
 
 def seed_database():
     """Заполнение базы данных тестовыми данными"""
@@ -93,19 +102,26 @@ def seed_database():
     app = create_app()
     
     with app.app_context():
-        print("🚀 Начинаем заполнение базы данных...")
-        print(f"📊 Конфигурация:")
-        print(f"   👥 Пользователей: {NUM_USERS}")
-        print(f"   🎨 Товаров: {NUM_PRODUCTS}")
-        print(f"   💰 Процент подписок: {PURCHASE_PERCENTAGE * 100}%")
-        print(f"   💸 Начальный баланс: {MarketConfig.STARTING_BALANCE} AC")
-        print(f"   📈 Стартовый капитал: {MarketConfig.SELLER_STARTUP_MULTIPLIER}× цена")
+        print("=" * 60)
+        print("🚀 НАЧАЛО ЗАПОЛНЕНИЯ БАЗЫ ДАННЫХ")
+        print("=" * 60)
+        print(f"\n📊 КОНФИГУРАЦИЯ СИДИНГА:")
+        print(f"   👥 Пользователей: {SeedConfig.NUM_USERS}")
+        print(f"   🎨 Товаров: {SeedConfig.NUM_PRODUCTS}")
+        print(f"   💰 Процент покупок: {SeedConfig.PURCHASE_PERCENTAGE * 100}%")
+        print(f"   🎁 Бонус за регистрацию: {MarketConfig.REGISTRATION_BONUS} AC")
+        print(f"   💰 Комиссия с продаж: {MarketConfig.COMMISSION_PERCENT * 100}%")
         print(f"   📦 Макс. товаров у продавца: {MarketConfig.MAX_ACTIVE_PRODUCTS_PER_SELLER}")
+        print(f"   💸 Минимальная цена: {MarketConfig.MIN_PRODUCT_PRICE} AC")
+        
+        # Папки для изображений
+        originals_folder = 'uploads/originals'
+        watermarked_folder = 'uploads/watermarked'
         
         # Проверяем папку с фото
         photo_examples_dir = 'photo_examples'
         if not os.path.exists(photo_examples_dir):
-            print("❌ Папка photo_examples не найдена! Создайте папку с изображениями.")
+            print("\n❌ Папка photo_examples не найдена! Создайте папку с изображениями.")
             print("   mkdir photo_examples")
             print("   # поместите туда несколько изображений (.jpg, .png и т.д.)")
             return
@@ -114,16 +130,19 @@ def seed_database():
                       if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.tiff'))]
         
         if not image_files:
-            print("❌ Нет изображений в папке photo_examples!")
+            print("\n❌ Нет изображений в папке photo_examples!")
             print("   Поместите несколько изображений в папку photo_examples/")
             return
         
-        print(f"📁 Найдено {len(image_files)} изображений")
+        print(f"\n📁 Найдено изображений: {len(image_files)}")
         
-        # Создаем пользователей
-        print("\n👥 Создаем пользователей...")
+        # ========== 1. СОЗДАНИЕ ПОЛЬЗОВАТЕЛЕЙ ==========
+        print("\n" + "=" * 60)
+        print("👥 ШАГ 1: СОЗДАНИЕ ПОЛЬЗОВАТЕЛЕЙ")
+        print("=" * 60)
+        
         users = []
-        for i in range(NUM_USERS):
+        for i in range(SeedConfig.NUM_USERS):
             try:
                 user = db_manager.create_account(
                     nickname=f"user_{i+1}",
@@ -131,78 +150,92 @@ def seed_database():
                     password="123456"
                 )
                 users.append(user)
-                print(f'   ✅ Создан пользователь: user_{i+1} (Баланс: {user.balance} AC)')
+                print(f'   ✅ [{i+1}/{SeedConfig.NUM_USERS}] Создан: user_{i+1} (Баланс: {user.balance} AC)')
             except Exception as e:
-                print(f"   ⚠️ Пользователь user_{i+1} уже существует или ошибка: {e}")
+                print(f"   ⚠️ Ошибка создания user_{i+1}: {e}")
         
         if not users:
-            print("❌ Не удалось создать пользователей!")
+            print("\n❌ Не удалось создать пользователей!")
             return
+        
+        print(f"\n✅ Итого создано пользователей: {len(users)}")
+        
+        # ========== 2. СОЗДАНИЕ ТОВАРОВ ==========
+        print("\n" + "=" * 60)
+        print("🎨 ШАГ 2: СОЗДАНИЕ ТОВАРОВ")
+        print("=" * 60)
         
         # Список прилагательных для названий
         adjectives = [
             "Уникальный", "Эксклюзивный", "Ценный", "Редкий", "Премиальный",
             "Инновационный", "Современный", "Классический", "Элегантный", "Стильный",
-            "Функциональный", "Надежный", "Качественный", "Популярный", "Модный"
+            "Функциональный", "Надежный", "Качественный", "Популярный", "Модный",
+            "Винтажный", "Коллекционный", "Лимитированный", "Авторский", "Дизайнерский",
+            "Экологичный", "Технологичный", "Эргономичный", "Компактный", "Универсальный"
         ]
         
         nouns = [
             "Товар", "Продукт", "Арт", "Объект", "Изделие",
-            "Аксессуар", "Элемент", "Экземпляр", "Предмет", "Образец"
+            "Аксессуар", "Элемент", "Экземпляр", "Предмет", "Образец",
+            "Шедевр", "Экспонат", "Реликвия", "Раритет", "Сокровище"
         ]
         
-        # Создаем товары
-        print("\n🎨 Создаем товары...")
+        # Создаем товары с циклическим использованием изображений
         products = []
+        num_products_to_create = min(SeedConfig.NUM_PRODUCTS, len(image_files) * 2)  # Можно использовать каждое изображение несколько раз
         
-        # Берем первые N изображений или все, если их меньше
-        num_products_to_create = min(NUM_PRODUCTS, len(image_files))
-        selected_images = image_files[:num_products_to_create]
-        
-        for i, image_file in enumerate(selected_images):
+        for i in range(num_products_to_create):
             try:
+                # Выбираем изображение по кругу
+                image_file = image_files[i % len(image_files)]
                 image_path = os.path.join(photo_examples_dir, image_file)
+                
+                # Выбираем случайного продавца
                 creator = random.choice(users)
                 
-                # Генерируем название (3-100 символов)
+                # Генерируем название
                 adjective = random.choice(adjectives)
                 noun = random.choice(nouns)
                 title = f"{adjective} {noun} #{i+1}"
                 
-                # Генерируем цену (от 1 до 10 AC)
-                price = random.randint(1, 10)
-                
-                # Рассчитываем стартовый капитал
-                startup_capital = price * MarketConfig.SELLER_STARTUP_MULTIPLIER
-                
-                print(f"   [{i+1}/{num_products_to_create}] Создаем товар: {title} (цена: {price} AC, стартовый капитал: {startup_capital} AC)")
-                
-                # Проверяем баланс продавца
-                if creator.balance < startup_capital:
-                    print(f"   ⚠️ У продавца {creator.nickname} недостаточно средств ({creator.balance} AC), пропускаем")
-                    continue
+                # Генерируем цену (от MIN_PRODUCT_PRICE до 500 AC)
+                price = random.randint(MarketConfig.MIN_PRODUCT_PRICE, 500)
                 
                 # Проверяем лимит товаров продавца
-                active_products = len([p for p in creator.products if p.is_active])
+                active_products = len([p for p in creator.products_for_sale if not p.is_sold])
                 if active_products >= MarketConfig.MAX_ACTIVE_PRODUCTS_PER_SELLER:
-                    print(f"   ⚠️ У продавца {creator.nickname} достигнут лимит товаров ({active_products}), пропускаем")
-                    continue
+                    # Ищем другого продавца с меньшим количеством товаров
+                    other_sellers = [u for u in users if len([p for p in u.products_for_sale if not p.is_sold]) < MarketConfig.MAX_ACTIVE_PRODUCTS_PER_SELLER]
+                    if other_sellers:
+                        creator = random.choice(other_sellers)
+                    else:
+                        print(f"   ⚠️ [{i+1}/{num_products_to_create}] Нет свободных продавцов, пропускаем")
+                        continue
                 
                 # Обрабатываем изображение
                 file_obj = SimpleFile(image_path)
-                image_info, error = process_uploaded_image_for_seed(file_obj)
+                image_info, error = process_uploaded_image_for_seed(
+                    file_obj, originals_folder, watermarked_folder
+                )
                 file_obj.close()
                 
                 if error:
-                    print(f"   ❌ Ошибка обработки изображения: {error}")
+                    print(f"   ❌ [{i+1}/{num_products_to_create}] Ошибка обработки: {error}")
                     continue
                 
                 if not image_info:
-                    print(f"   ❌ Не удалось обработать изображение")
+                    print(f"   ❌ [{i+1}/{num_products_to_create}] Не удалось обработать изображение")
                     continue
                 
-                # Генерируем описание (до 1000 символов)
-                description = f"Это прекрасный товар '{title}'. Качественное исполнение, надежность и стильный дизайн. Этот экземпляр обладает уникальными характеристиками и высокой ценностью для коллекционеров и инвесторов."
+                # Генерируем описание
+                descriptions = [
+                    f"Это прекрасный товар '{title}'. Качественное исполнение, надежность и стильный дизайн.",
+                    f"Эксклюзивный экземпляр '{title}' в единственном экземпляре. Идеальное состояние.",
+                    f"Коллекционный предмет '{title}'. Редкая находка для ценителей.",
+                    f"Уникальное предложение - {title}. Только сегодня по такой цене!",
+                    f"Премиальный {noun.lower()} {title.lower()}. Доставка по всей стране.",
+                ]
+                description = random.choice(descriptions)
                 
                 # Создаем товар
                 product = db_manager.create_product(
@@ -214,109 +247,152 @@ def seed_database():
                 )
                 
                 products.append(product)
-                print(f"   ✅ Создан товар: {product.title} (Продавец: {creator.nickname}, Текущая цена: {product.current_price} AC, Портфель: {product.portfolio} AC)")
+                
+                # Прогресс-бар
+                if (i + 1) % 20 == 0 or i + 1 == num_products_to_create:
+                    print(f'   ✅ Прогресс: {len(products)}/{num_products_to_create}')
                 
             except Exception as e:
-                print(f"   ❌ Ошибка создания товара: {e}")
+                print(f"   ❌ Ошибка создания товара {i+1}: {e}")
         
         if not products:
-            print("❌ Не удалось создать ни одного товара!")
+            print("\n❌ Не удалось создать ни одного товара!")
             return
         
-        # Создаем подписки
-        print("\n💰 Создаем подписки...")
-        subscription_count = 0
+        print(f"\n✅ Итого создано товаров: {len(products)}")
         
-        for product in products:
-            # Определяем количество подписчиков для этого товара
-            num_potential_subscribers = len(users) - 1
-            num_subscriptions = int(num_potential_subscribers * PURCHASE_PERCENTAGE)
+        # ========== 3. СОЗДАНИЕ ПОКУПОК ==========
+        print("\n" + "=" * 60)
+        print("💰 ШАГ 3: СОЗДАНИЕ ПОКУПОК")
+        print("=" * 60)
+        
+        # Определяем количество товаров для покупки
+        num_to_buy = int(len(products) * SeedConfig.PURCHASE_PERCENTAGE)
+        
+        if num_to_buy > 0:
+            # Перемешиваем товары для случайного выбора
+            products_shuffled = products.copy()
+            random.shuffle(products_shuffled)
+            products_to_buy = products_shuffled[:num_to_buy]
             
-            # Исключаем продавца из списка потенциальных подписчиков
-            potential_subscribers = [user for user in users if user.id != product.creator_id]
+            print(f"\n📊 Планируется купить {num_to_buy} товаров ({SeedConfig.PURCHASE_PERCENTAGE * 100}% от всех)")
             
-            if potential_subscribers and num_subscriptions > 0:
-                # Выбираем подписчиков (но не больше, чем есть)
-                num_to_select = min(num_subscriptions, len(potential_subscribers))
-                subscribers = random.sample(potential_subscribers, num_to_select)
+            purchase_count = 0
+            failed_count = 0
+            
+            for idx, product in enumerate(products_to_buy):
+                # Ищем покупателя (не продавца и с достаточным балансом)
+                potential_buyers = [u for u in users if u.id != product.creator_id and u.balance >= product.price]
                 
-                for subscriber in subscribers:
-                    try:
-                        # Проверяем баланс подписчика
-                        if subscriber.balance >= product.current_price:
-                            db_manager.subscribe_to_product(subscriber.id, product.id)
-                            subscription_count += 1
-                            print(f"   ✅ Подписка: {subscriber.nickname} → {product.title} за {product.current_price} AC")
-                    except Exception as e:
-                        print(f"   ⚠️ Ошибка при создании подписки: {e}")
-        
-        # Генерируем историю цен для всех товаров
-        print("\n📈 Генерируем историю цен...")
-        for product in products:
-            try:
-                # Создаем небольшую историю цен (от 1 до 7 дней)
-                days_history = random.randint(1, 7)
-                for day in range(days_history):
-                    # Генерируем случайное изменение цены
-                    price_change = random.uniform(-0.2, 0.3)  # -20% до +30%
-                    new_price = max(1, int(product.current_price * (1 + price_change)))
+                if not potential_buyers:
+                    print(f"   ⚠️ [{idx+1}/{num_to_buy}] Нет подходящих покупателей для '{product.title[:30]}...'")
+                    failed_count += 1
+                    continue
+                
+                # Выбираем случайного покупателя
+                buyer = random.choice(potential_buyers)
+                
+                try:
+                    # Выполняем покупку
+                    db_manager.buy_product(buyer.id, product.id)
+                    purchase_count += 1
                     
-                    # Обновляем цену (имитация дневного обновления)
-                    product.current_price = new_price
-                    # Здесь должен быть вызов метода обновления истории цен в БД
-                
-                print(f"   ✅ История цен для {product.title}: {days_history} дней, текущая цена: {product.current_price} AC")
+                    # Показываем прогресс каждые 10 покупок
+                    if purchase_count % 10 == 0:
+                        print(f'   ✅ Прогресс: {purchase_count}/{num_to_buy}')
+                        
+                except Exception as e:
+                    print(f"   ❌ Ошибка покупки {product.title[:30]}: {e}")
+                    failed_count += 1
+            
+            print(f"\n✅ Итого совершено покупок: {purchase_count}")
+            if failed_count > 0:
+                print(f"⚠️ Не удалось совершить: {failed_count}")
+        else:
+            print("\n⚠️ Покупки не создаются (SeedConfig.PURCHASE_PERCENTAGE = 0)")
+        
+        # ========== 4. НАЧИСЛЕНИЕ ЕЖЕДНЕВНЫХ БОНУСОВ ==========
+        print("\n" + "=" * 60)
+        print("🎁 ШАГ 4: НАЧИСЛЕНИЕ ЕЖЕДНЕВНЫХ БОНУСОВ")
+        print("=" * 60)
+        
+        bonus_count = 0
+        for user in users:
+            try:
+                if user.balance < MarketConfig.DAILY_BONUS_MAX_BALANCE:
+                    db_manager.claim_daily_bonus(user.id)
+                    bonus_count += 1
             except Exception as e:
-                print(f"   ⚠️ Ошибка генерации истории цен: {e}")
+                # Пропускаем ошибки (например, если бонус уже был получен сегодня)
+                pass
         
-        # Статистика
-        print("\n🎉 Заполнение завершено!")
-        print(f"📊 Итоговая статистика:")
-        print(f"   👥 Пользователей создано: {len(users)}")
-        print(f"   🎨 Товаров создано: {len(products)}")
-        print(f"   💰 Подписок создано: {subscription_count}")
+        print(f"✅ Бонусы начислены {bonus_count} пользователям")
         
-        # Считаем общую экономику
-        total_portfolio = sum(p.portfolio for p in products)
-        total_subscriptions_money = sum(p.subscriptions_money for p in products)
+        # ========== 5. ИТОГОВАЯ СТАТИСТИКА ==========
+        print("\n" + "=" * 60)
+        print("📊 ИТОГОВАЯ СТАТИСТИКА")
+        print("=" * 60)
         
-        print(f"\n💼 Общая экономика:")
-        print(f"   🏦 Общий портфель всех товаров: {total_portfolio} AC")
-        print(f"   💸 Деньги от подписок: {total_subscriptions_money} AC")
+        # Считаем статистику
+        total_balance = sum(u.balance for u in users)
+        total_spent = sum(u.total_spent for u in users)
+        total_earned = sum(u.total_earned for u in users)
         
-        # Показываем балансы пользователей
-        print(f"\n💳 Балансы пользователей (первые 10):")
-        for user in users[:10]:
-            active_products = len([p for p in user.products if p.is_active])
-            subscriptions = len([s for s in user.subscriptions if s.is_active])
-            print(f"   {user.nickname}: {user.balance} AC (товаров: {active_products}, подписок: {subscriptions})")
+        # Считаем товары
+        products_for_sale = len([p for p in products if not p.is_sold])
+        products_sold = len([p for p in products if p.is_sold])
         
-        # Показываем топ-5 товаров по подписчикам
-        print(f"\n🏆 Топ-5 товаров по подписчикам:")
-        products_by_subscribers = sorted(products, key=lambda p: p.subscribers_count, reverse=True)
-        for i, product in enumerate(products_by_subscribers[:5]):
-            print(f"   {i+1}. {product.title}: {product.subscribers_count} подписчиков, цена: {product.current_price} AC")
+        print(f"\n👥 ПОЛЬЗОВАТЕЛИ:")
+        print(f"   Всего создано: {len(users)}")
+        print(f"   Общий баланс: {total_balance} AC")
+        print(f"   Всего потрачено: {total_spent} AC")
+        print(f"   Всего заработано: {total_earned} AC")
         
-        print("\n🔗 API v2.1 доступно по адресу: http://localhost:5000")
-        print("📚 Основные эндпоинты API:")
-        print("   GET    /api/health - проверка работы")
-        print("   POST   /api/auth/register - регистрация")
-        print("   POST   /api/auth/login - вход")
-        print("   POST   /api/auth/refresh - обновление токена")
-        print("   GET    /api/auth/profile - профиль пользователя")
-        print("   GET    /api/products - список товаров")
-        print("   POST   /api/products - создать товар (multipart/form-data)")
-        print("   GET    /api/products/<id> - информация о товаре")
-        print("   PUT    /api/products/<id>/price - изменить цену")
-        print("   POST   /api/products/<id>/subscribe - подписаться")
-        print("   POST   /api/products/<id>/unsubscribe - отписаться")
-        print("   POST   /api/products/<id>/remove - снять с продажи")
-        print("   GET    /api/products/search - поиск товаров")
-        print("   GET    /api/account/subscriptions - мои подписки")
-        print("   POST   /api/account/bankruptcy - объявить банкротство")
-        print("   GET    /api/players/rating - рейтинг игроков")
-        print("   GET    /api/images/thumbnail/<file_id> - получить изображение")
+        print(f"\n🎨 ТОВАРЫ:")
+        print(f"   Всего создано: {len(products)}")
+        print(f"   В продаже: {products_for_sale}")
+        print(f"   Продано: {products_sold}")
+        print(f"   Процент продаж: {products_sold / len(products) * 100:.1f}%")
+        
+        print(f"\n💰 ЭКОНОМИКА:")
+        print(f"   Средний баланс пользователя: {total_balance // len(users)} AC")
+        print(f"   Средняя цена товара: {sum(p.price for p in products) // len(products)} AC")
+        print(f"   Средняя цена проданных: {sum(p.price for p in products if p.is_sold) // max(products_sold, 1)} AC")
+        
+        # Показываем топ-5 пользователей по балансу
+        print(f"\n🏆 ТОП-5 ПОЛЬЗОВАТЕЛЕЙ ПО БАЛАНСУ:")
+        sorted_users = sorted(users, key=lambda u: u.balance, reverse=True)
+        for i, user in enumerate(sorted_users[:5]):
+            products_for_sale_count = len([p for p in user.products_for_sale if not p.is_sold])
+            purchased_count = len([p for p in user.owned_products if p.is_sold])
+            print(f"   {i+1}. {user.nickname}: {user.balance} AC (на продаже: {products_for_sale_count}, куплено: {purchased_count})")
+        
+        # Показываем топ-5 товаров по цене
+        print(f"\n🏷️ ТОП-5 САМЫХ ДОРОГИХ ТОВАРОВ:")
+        products_by_price = sorted(products, key=lambda p: p.price, reverse=True)
+        for i, product in enumerate(products_by_price[:5]):
+            status = "🔴 ПРОДАН" if product.is_sold else "🟢 В ПРОДАЖЕ"
+            print(f"   {i+1}. {product.title[:40]}: {product.price} AC - {status}")
+        
+        # Показываем информацию о товарах в продаже
+        if products_for_sale > 0:
+            print(f"\n📦 В ПРОДАЖЕ ОСТАЛОСЬ {products_for_sale} ТОВАРОВ")
+            print(f"   Минимальная цена: {min(p.price for p in products if not p.is_sold)} AC")
+            print(f"   Максимальная цена: {max(p.price for p in products if not p.is_sold)} AC")
+            print(f"   Средняя цена: {sum(p.price for p in products if not p.is_sold) // products_for_sale} AC")
+        
+        print("\n" + "=" * 60)
+        print("🎉 ЗАПОЛНЕНИЕ БАЗЫ ДАННЫХ ЗАВЕРШЕНО!")
+        print("=" * 60)
+        
+        print("\n📚 API v4.0 доступно по адресу: http://localhost:5000")
+        print("\n🔑 Тестовые учетные данные:")
+        print("   Логин: user_1 ... user_20")
+        print("   Пароль: 123456")
+        
         print("\n🚀 Для запуска сервера выполните: python main.py")
+        print("💡 Для принудительного обновления: docker exec art-market python daily_updater.py --run-now")
+
 
 if __name__ == "__main__":
     seed_database()

@@ -3,7 +3,6 @@ import logging
 import os
 from web_server import create_app
 from database import db_manager
-from database import BankruptcyManager
 
 # Настройка логирования
 logging.basicConfig(
@@ -12,9 +11,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def update_daily_prices():
-    """Обновляет цены товаров и збрасывает cooldown банкротств"""
-    logger.info("🔄 Начало ежедневного обновления цен...")
+def update_daily_data():
+    """Ежедневное обновление: обновляет историю баланса и сбрасывает cooldown банкротства"""
+    logger.info("🔄 Начало ежедневного обновления...")
     
     # Создаем приложение вручную, без контекста запроса
     app = create_app()
@@ -24,23 +23,13 @@ def update_daily_prices():
             
             # 🔄 ШАГ 1: Сбрасываем cooldown банкротства для всех пользователей
             logger.info("🔄 Сброс cooldown банкротства...")
-            BankruptcyManager.reset_bankruptcy_cooldown_for_all()
+            db_manager.reset_all_bankruptcy_cooldowns()
             logger.info("✅ Cooldown банкротства сброшен для всех пользователей")
             
-            # 🔄 ШАГ 2: Обновляем цены товаров
-            products = db_manager.get_daily_update_products()
-            updated_count = 0
-            
-            for product in products:
-                try:
-                    # Обновляем историю цен
-                    db_manager.update_product_price_history(product)
-                    updated_count += 1
-                except Exception as e:
-                    logger.error(f"Ошибка обновления товара {product.id}: {e}")
-                    continue
-            
-            logger.info(f"✅ Обновлено {updated_count} товаров")
+            # 🔄 ШАГ 2: Обновляем историю баланса для всех пользователей
+            logger.info("🔄 Обновление истории баланса...")
+            updated_count = db_manager.update_all_balance_histories()
+            logger.info(f"✅ Обновлена история баланса для {updated_count} пользователей")
             
         except Exception as e:
             logger.error(f"❌ Ошибка обновления: {e}")
@@ -50,6 +39,6 @@ if __name__ == "__main__":
     # Если переданы аргументы командной строки
     if len(os.sys.argv) > 1 and os.sys.argv[1] == "--run-now":
         # Запускаем обновление немедленно
-        update_daily_prices()
+        update_daily_data()
     else:
-        print('Доступен запуск только с параметром "--run-now", для немедленного обновления цен на платформе')
+        print('Доступен запуск только с параметром "--run-now", для немедленного обновления на платформе')

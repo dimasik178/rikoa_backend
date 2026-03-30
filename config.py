@@ -1,20 +1,23 @@
 from dotenv import load_dotenv
 import os 
-# 🔧 КОНФИГУРАЦИЯ ПРОЕКТА "РЫНОК ТОВАРОВ С ИНВЕСТИЦИЯМИ"
+# 🔧 КОНФИГУРАЦИЯ ПРОЕКТА "МАРКЕТПЛЕЙС С БОНУСАМИ"
 
 #===================================[ Изменения ]====================================#
-#                                    Версия: 3.2                                     #
-# Обновил запуск контейнера + подправил выгрузку и проверку переменных из .env файла #
-#         Также убрал из сидинга проверку sucess - который ушёл в версии 3.1         #
+#                                    Версия: 4.0                                     #
+#         Полный рефакторинг: переход от инвестиционной платформы к маркетплейсу     #
+#                    Добавлены бонусы, комиссии, водяные знаки                       #
 #====================================================================================#
 
 load_dotenv()
-MARKET_VERSION = "3.2" # Версия проекта, возвращается на /api/health
+MARKET_VERSION = "4.0" # Версия проекта, возвращается на /api/health
 
 # 🌱 НАСТРОЙКИ ЗАПОЛНЕНИЯ БАЗЫ ДАННЫХ (для seed.py)
-NUM_USERS = 15                    # Количество пользователей для сидинга
-NUM_PRODUCTS = 20                # Количество товаров для сидинга
-PURCHASE_PERCENTAGE = 0.6        # Процент подписок для сидинга
+class SeedConfig:
+    """Конфигурация сидинга"""
+    NUM_USERS = 20                    # Количество пользователей
+    NUM_PRODUCTS = 100                # Количество товаров
+    PURCHASE_PERCENTAGE = 0.3         # Процент товаров, которые будут куплены (30%)
+    MAX_PURCHASES_PER_PRODUCT = 1     # Максимум покупок одного товара (1 = каждый товар покупается только один раз)
 
 # 🔐 JWT НАСТРОЙКИ
 class JWTConfig:
@@ -32,22 +35,36 @@ class MarketConfig:
     # БАЛАНС И ЦЕНЫ
     STARTING_BALANCE = 100           # Начальный баланс пользователя
     BANKRUPTCY_RESET_BALANCE = 100   # Баланс после банкротства
-    MIN_PRODUCT_PRICE = 1            # Минимальная цена товара
+    REGISTRATION_BONUS = 200         # Бонус за регистрацию
+    DAILY_BONUS_AMOUNT = 50          # Ежедневный бонус
+    DAILY_BONUS_MAX_BALANCE = 500    # Максимальный баланс для получения бонуса
+    
+    # КОМИССИЯ
+    COMMISSION_PERCENT = 0.05        # 5% комиссия с продажи (0.05 = 5%)
+    
+    # ЦЕНЫ ТОВАРОВ
+    MIN_PRODUCT_PRICE = 10           # Минимальная цена товара
     MAX_PRODUCT_PRICE = 10000        # Максимальная цена товара
     
     # ВЫСТАВЛЕНИЕ ТОВАРА
-    SELLER_STARTUP_MULTIPLIER = 10   # 10× цена = стартовый капитал продавца
     MAX_ACTIVE_PRODUCTS_PER_SELLER = 8  # Максимально активных товаров у продавца
     
     # ВРЕМЕННЫЕ НАСТРОЙКИ
-    PRICE_UPDATE_TIME = "00:00"            # 0:00 - время обновления цен
-    PRICE_HISTORY_DAYS = 6           # Дней в графике цены (6 чисел)
+    PRICE_UPDATE_TIME = "00:00"            # 0:00 - время обновления истории баланса
+    BALANCE_HISTORY_DAYS = 30          # Дней в графике баланса
     
     # ВАЛИДАЦИЯ
     MIN_TITLE_LENGTH = 3
     MAX_TITLE_LENGTH = 100
     MIN_DESCRIPTION_LENGTH = 10
     MAX_DESCRIPTION_LENGTH = 1000
+
+# 🖼️ КОНФИГУРАЦИЯ ВОДЯНЫХ ЗНАКОВ
+class WatermarkConfig:
+    """Конфигурация водяных знаков"""
+    WATERMARK_TEXT = "DEMO_ART_MARKET"           # Текст водяного знака
+    WATERMARK_OPACITY = 0.6                      # Прозрачность (0-1) чем больше значение, тем силнее заметна надпись
+    WATERMARK_FONT_SIZE_RATIO = 0.05             # Размер шрифта от ширины изображения
 
 # ⚙️ НАСТРОЙКИ СЕРВЕРА
 class ServerConfig:
@@ -60,6 +77,8 @@ class ServerConfig:
     # НАСТРОЙКИ ЗАГРУЗКИ ФАЙЛОВ
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max file size
     UPLOAD_FOLDER = 'uploads'
+    ORIGINALS_FOLDER = 'uploads/originals'      # Оригинальные изображения
+    WATERMARKED_FOLDER = 'uploads/watermarked'  # Изображения с водяным знаком
     ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tiff'}
     MAX_PROCESSING_TIME = 30  # Максимальное время обработки в секундах
     MAX_IMAGE_DIMENSION = 10000  # Максимальный размер изображения

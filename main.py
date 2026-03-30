@@ -6,8 +6,9 @@ import sys
 import threading
 import schedule
 import time
-from daily_updater import update_daily_prices
+from daily_updater import update_daily_data
 from config import MarketConfig
+
 PRICE_UPDATE_TIME = MarketConfig.PRICE_UPDATE_TIME
 
 
@@ -18,9 +19,9 @@ scheduler_thread = None
 def safe_update():
     """Безопасное обновление с обработкой ошибок"""
     try:
-        update_daily_prices()
+        update_daily_data()
     except Exception as e:
-        print(f"❌ Ошибка при обновлении цен: {e}")
+        print(f"❌ Ошибка при обновлении: {e}")
 
 def run_scheduler():
     """Контролируемый планировщик"""
@@ -60,14 +61,14 @@ def main():
         global scheduler_thread
         scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
         scheduler_thread.start()
-    else: # Избегаем дублирование запусков обновлений цен на рынке
+    else: # Избегаем дублирование запусков
         print("🔄 Reloader process detected, scheduler not started")
     
     print("🚀 Market API Server starting...")
     print("📊 Database initialized")
     print("🌐 JSON API ready")
-    print("💰 Investment system: ACTIVE")
-    print(f"⏰ Price scheduler: ACTIVE (update at {PRICE_UPDATE_TIME})")
+    print("💰 Marketplace system: ACTIVE")
+    print(f"⏰ Daily updater scheduler: ACTIVE (update at {PRICE_UPDATE_TIME})")
     print(f"🔗 Server running at: http://localhost:5000")
     print("\n📚 Available endpoints:")
     print("   GET  /api/health - Health check")
@@ -75,9 +76,20 @@ def main():
     print("   POST /api/auth/login - Login")
     print("   POST /api/auth/refresh - Refresh token")
     print("   GET  /api/auth/profile - User profile")
-    print("   GET  /api/products - List products")
+    print("   GET  /api/products - List products for sale")
     print("   POST /api/products - Create product")
     print("   GET  /api/products/<id> - Product details")
+    print("   POST /api/products/<id>/buy - Buy product")
+    print("   POST /api/products/<id>/remove - Remove product")
+    print("   GET  /api/products/search - Search products")
+    print("   GET  /api/account/purchases - My purchases")
+    print("   GET  /api/account/sales - My sales")
+    print("   GET  /api/account/stats - Account statistics")
+    print("   POST /api/account/daily-bonus - Claim daily bonus")
+    print("   POST /api/account/bankruptcy - Declare bankruptcy")
+    print("   GET  /api/players/rating - Players rating")
+    print("   GET  /api/images/original/<id> - Original image (owner only)")
+    print("   GET  /api/images/watermarked/<id> - Watermarked image")
     
     return app
 

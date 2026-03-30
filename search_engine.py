@@ -1,5 +1,4 @@
 import re
-import math
 from difflib import SequenceMatcher
 from typing import List, Tuple, Dict, Set
 from models import Product
@@ -106,7 +105,7 @@ class ProductSearchEngine:
         Выполняет интеллектуальный поиск с триграммами
         
         Args:
-            products: Список товаров для поиска
+            products: Список товаров для поиска (только непроданные)
             search_term: Поисковый запрос (уже декодированный)
             max_results: Максимальное количество результатов
             
