@@ -50,8 +50,8 @@ class MarketConfig:
     MAX_ACTIVE_PRODUCTS_PER_SELLER = 8  # Максимально активных товаров у продавца
     
     # ВРЕМЕННЫЕ НАСТРОЙКИ
-    PRICE_UPDATE_TIME = "00:00"            # 0:00 - время обновления истории баланса
-    BALANCE_HISTORY_DAYS = 30          # Дней в графике баланса
+    PRICE_UPDATE_TIME = "00:00"       # 0:00 - время обновления истории баланса
+    BALANCE_HISTORY_DAYS = 30         # Дней в графике баланса
     
     # ВАЛИДАЦИЯ
     MIN_TITLE_LENGTH = 3
@@ -65,6 +65,7 @@ class WatermarkConfig:
     WATERMARK_TEXT = "DEMO_ART_MARKET"           # Текст водяного знака
     WATERMARK_OPACITY = 0.6                      # Прозрачность (0-1) чем больше значение, тем силнее заметна надпись
     WATERMARK_FONT_SIZE_RATIO = 0.05             # Размер шрифта от ширины изображения
+    WATERMARK_FONT_PATH = "fonts/Roboto-Regular.ttf"  # Путь к файлу шрифта (относительно корня проекта)
 
 # ⚙️ НАСТРОЙКИ СЕРВЕРА
 class ServerConfig:

@@ -31,25 +31,34 @@ def add_watermark(image_path: str, output_path: str) -> bool:
         # Рассчитываем размер шрифта (5% от ширины изображения)
         font_size = int(img.width * WatermarkConfig.WATERMARK_FONT_SIZE_RATIO)
         
-        # Пытаемся загрузить шрифт, если нет - используем дефолтный
-        try:
-            # Пробуем разные пути для шрифтов в Linux
-            font_paths = [
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-                "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-                "/System/Library/Fonts/Helvetica.ttc",  # macOS
-                "C:\\Windows\\Fonts\\Arial.ttf"        # Windows
-            ]
-            font = None
-            for font_path in font_paths:
+        # Пути к шрифтам в порядке приоритета
+        font_paths = [
+            WatermarkConfig.WATERMARK_FONT_PATH,                    # Локальный шрифт проекта
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",      # Linux (Debian/Ubuntu)
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",  # Linux
+            "/System/Library/Fonts/Helvetica.ttc",                  # macOS
+            "C:\\Windows\\Fonts\\Arial.ttf",                        # Windows
+            "C:\\Windows\\Fonts\\Roboto.ttf",                       # Windows (альтернатива)
+        ]
+        
+        # Пытаемся загрузить шрифт
+        font = None
+        for font_path in font_paths:
+            try:
                 if os.path.exists(font_path):
                     font = ImageFont.truetype(font_path, font_size)
+                    logger.debug(f"Загружен шрифт: {font_path}")
+                    print("✅", font_path)
                     break
-            if font is None:
-                font = ImageFont.load_default()
-        except Exception:
-            font = ImageFont.load_default()
+            except Exception as e:
+                logger.debug(f"Не удалось загрузить шрифт {font_path}: {e}")
+                continue
         
+        # Если ни один шрифт не загрузился, используем дефолтный
+        if font is None:
+            logger.warning("Не удалось загрузить ни один шрифт, используется дефолтный")
+            font = ImageFont.load_default()
+        print(font)
         # Текст водяного знака
         text = WatermarkConfig.WATERMARK_TEXT
         
