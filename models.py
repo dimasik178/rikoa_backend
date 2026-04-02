@@ -189,21 +189,6 @@ class Product(db.Model):
             },
             'purchased_at': self.purchased_at.isoformat() if self.purchased_at else None,
         }
-    
-    def to_dict_for_purchase_history(self):
-        """Данные для истории покупок"""
-        return {
-            'id': self.id,
-            'title': self.title,
-            'price': self.price,
-            'photo_url': f"/api/images/original/{self.photo_url}",
-            'purchased_at': self.purchased_at.isoformat() if self.purchased_at else None,
-            'creator': {
-                'id': self.creator.id,
-                'nickname': self.creator.nickname
-            }
-        }
-
 
 class Purchase(db.Model):
     __tablename__ = 'purchases'
