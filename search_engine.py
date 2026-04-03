@@ -92,12 +92,16 @@ class ProductSearchEngine:
     
     def _prepare_search_text(self, product: Product) -> str:
         """Подготавливает поисковый текст из товара"""
-        fields = [
-            product.title,
-            product.description or '',
-            product.creator.nickname if product.creator else '',
-        ]
-        return " ".join(filter(None, fields))
+        field_map = {
+            "title": product.title,
+            "description": product.description or '',
+            "creator": product.creator.nickname if product.creator else '',
+        }
+        
+        # Собираем только активные поля
+        fields = [field_map[name] for name, active in self.config.SEARCH_FIELDS.items() if active]
+        
+        return " ".join(fields)
     
     def search(self, products: List[Product], search_term: str, 
                max_results: int = SearchConfig.MAX_VALUES["results_limit"]) -> List[Tuple[Product, float]]:
