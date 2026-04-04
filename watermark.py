@@ -48,7 +48,6 @@ def add_watermark(image_path: str, output_path: str) -> bool:
                 if os.path.exists(font_path):
                     font = ImageFont.truetype(font_path, font_size)
                     logger.debug(f"Загружен шрифт: {font_path}")
-                    print("✅", font_path)
                     break
             except Exception as e:
                 logger.debug(f"Не удалось загрузить шрифт {font_path}: {e}")
@@ -58,7 +57,6 @@ def add_watermark(image_path: str, output_path: str) -> bool:
         if font is None:
             logger.warning("Не удалось загрузить ни один шрифт, используется дефолтный")
             font = ImageFont.load_default()
-        print(font)
         # Текст водяного знака
         text = WatermarkConfig.WATERMARK_TEXT
         

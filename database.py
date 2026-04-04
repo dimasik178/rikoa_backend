@@ -1,13 +1,15 @@
 from models import db, Account, Product, Purchase
 from flask import Flask
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-from sqlalchemy import desc, and_
+from sqlalchemy import desc
 from werkzeug.security import generate_password_hash, check_password_hash
-from config import MarketConfig
-from datetime import datetime, timezone
+from hashes_manager import hashes_manager
+from config import MarketConfig, ServerConfig, ApiConfig
+import os
 import json
-from decimal import Decimal
 import logging
+from decimal import Decimal
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +48,7 @@ class BankruptcyManager:
             return False, f"Нельзя объявить банкротство при балансе ≥ {MarketConfig.BANKRUPTCY_RESET_BALANCE} AC"
         
         # 3. Проверяем активные товары на продаже
-        active_products = [p for p in account.products_for_sale if not p.is_sold]
+        active_products = [p for p in account.products_for_sale if p.on_sale]
         if active_products:
             return False, "Нельзя объявить банкротство с активными товарами на продаже. Сначала снимите товары с продажи."
         
@@ -150,7 +152,7 @@ class ProductManager:
         """Проверяет лимит активных товаров продавца (непроданных)"""
         active_count = Product.query.filter_by(
             creator_id=account_id, 
-            is_sold=False
+            on_sale=True
         ).count()
         
         if active_count >= MarketConfig.MAX_ACTIVE_PRODUCTS_PER_SELLER:
@@ -287,21 +289,18 @@ class DatabaseManager:
     
     # ========== ТОВАРЫ ==========
     
-    def create_product(self, creator_id: str, title: str, price: int, 
-                      description: str, photo_url: str) -> Product:
-        """Создает новый товар (без списания средств)"""
-        # Валидация цены
+    def create_product(self, creator_id: str, owner_id: str, title: str, price: int, 
+                      description: str, photo_url: str, original_hash: str, 
+                      watermarked_hash: str, on_sale: bool = True) -> Product:
+        """Создаёт новый товар (первая продажа)"""
         price = ProductManager.validate_price(price)
         
-        # Получаем аккаунт продавца
         creator = self.get_account_by_id(creator_id)
         if not creator:
             raise ValueError("Продавец не найден")
         
-        # Проверяем лимит товаров
         ProductManager.check_seller_limit(creator_id)
         
-        # Валидация длины
         if len(title) < MarketConfig.MIN_TITLE_LENGTH:
             raise ValueError(f"Название должно быть не менее {MarketConfig.MIN_TITLE_LENGTH} символов")
         if len(title) > MarketConfig.MAX_TITLE_LENGTH:
@@ -309,18 +308,37 @@ class DatabaseManager:
         if len(description) > MarketConfig.MAX_DESCRIPTION_LENGTH:
             raise ValueError(f"Описание должно быть не более {MarketConfig.MAX_DESCRIPTION_LENGTH} символов")
         
-        # Создаем товар (деньги не списываются!)
         product = Product(
             creator_id=creator_id,
-            owner_id=creator_id,  # Изначально владелец = создатель
+            owner_id=owner_id,
             title=title,
             price=price,
             description=description,
             photo_url=photo_url,
-            is_sold=False
+            original_hash=original_hash,
+            watermarked_hash=watermarked_hash,
+            on_sale=on_sale
         )
         
         db.session.add(product)
+        db.session.commit()
+        
+        return product
+    
+    def relist_product(self, original_hash: str, owner_id: str) -> Product:
+        """Выставляет существующий товар на продажу (перепродажа)"""
+        product = Product.query.filter_by(
+            original_hash=original_hash,
+            owner_id=owner_id
+        ).first()
+        
+        if not product:
+            raise ValueError("Товар не найден")
+        
+        if product.on_sale:
+            raise ValueError("Товар уже выставлен на продажу")
+        
+        product.on_sale = True
         db.session.commit()
         
         return product
@@ -333,9 +351,9 @@ class DatabaseManager:
         """Получает товар по photo_url (file_id)"""
         return Product.query.filter_by(photo_url=file_id).first()
     
-    def get_products_paginated(self, page: int = 1, per_page: int = 14):
-        """Получает непроданные товары с пагинацией"""
-        return Product.query.filter_by(is_sold=False).order_by(
+    def get_products_on_sale_paginated(self, page: int = 1, per_page: int = ApiConfig.PRODUCTS_PER_PAGE):
+        """Получает только товары в продаже с пагинацией"""
+        return Product.query.filter_by(on_sale=True).order_by(
             desc(Product.created_at)
         ).paginate(page=page, per_page=per_page, error_out=False)
     
@@ -343,62 +361,53 @@ class DatabaseManager:
         """Получает товары пользователя на продаже (непроданные)"""
         return Product.query.filter_by(
             creator_id=account_id, 
-            is_sold=False
+            on_sale=True
         ).order_by(desc(Product.created_at)).all()
     
     def get_user_purchased_products(self, account_id: str):
         """Получает купленные пользователем товары"""
         return Product.query.filter_by(
             owner_id=account_id, 
-            is_sold=True
+            on_sale=False
         ).order_by(desc(Product.purchased_at)).all()
     
     def buy_product(self, buyer_id: str, product_id: str) -> Product:
         """Покупка товара"""
-        
-        # Получаем товар
         product = self.get_product(product_id)
         if not product:
             raise ValueError("Товар не найден")
         
-        # Проверяем, что товар не продан
-        if product.is_sold:
-            raise ValueError("Товар уже продан")
+        if not product.on_sale:
+            raise ValueError("Товар не в продаже")
         
-        # Получаем покупателя и продавца
         buyer = self.get_account_by_id(buyer_id)
-        seller = self.get_account_by_id(product.creator_id)
+        seller = self.get_account_by_id(product.owner_id)
         
         if not buyer or not seller:
             raise ValueError("Пользователь не найден")
         
-        # Проверяем, что покупатель не продавец
-        if buyer_id == product.creator_id:
+        if buyer_id == product.owner_id:
             raise ValueError("Нельзя купить свой товар")
         
-        # Проверяем баланс покупателя
         if buyer.balance < product.price:
-            raise ValueError(f"Недостаточно средств. Нужно: {product.price} AC, ваш баланс: {buyer.balance} AC")
+            raise ValueError(f"Недостаточно средств. Нужно: {product.price} AC")
         
-        # Рассчитываем комиссию
         commission, seller_gets = ProductManager.calculate_commission(product.price)
         
-        # Выполняем транзакцию
         def transaction():
-            # 1. Списываем деньги с покупателя
             buyer.balance -= product.price
             buyer.total_spent += product.price
             
-            # 2. Начисляем деньги продавцу (минус комиссия)
             seller.balance += seller_gets
             seller.total_earned += seller_gets
             
-            # 3. Обновляем товар
             product.owner_id = buyer_id
-            product.is_sold = True
+            product.on_sale = False
             product.purchased_at = datetime.utcnow()
             
-            # 4. Создаем запись о покупке
+            # Обновляем владельца в памяти
+            hashes_manager.update_owner(product.original_hash, buyer_id)
+            
             purchase = Purchase(
                 buyer_id=buyer_id,
                 seller_id=product.creator_id,
@@ -411,26 +420,33 @@ class DatabaseManager:
             
             return product
         
-        product = TransactionManager.execute_transaction(transaction)
-        
-        return product
+        return TransactionManager.execute_transaction(transaction)
     
-    def remove_product(self, product_id: str, seller_id: str):
-        """Удаляет товар (только если не продан)"""
+    def remove_product(self, product_id: str, seller_id: str) -> dict:
+        """Удаляет товар (только если не в продаже)"""
         product = self.get_product(product_id)
         if not product:
             raise ValueError("Товар не найден")
         
-        # Проверяем права
-        if product.creator_id != seller_id:
+        if product.owner_id != seller_id:
             raise ValueError("Только владелец может удалить товар")
         
-        # Проверяем, что товар не продан
-        if product.is_sold:
-            raise ValueError("Нельзя удалить проданный товар")
+        if product.on_sale:
+            raise ValueError("Сначала снимите товар с продажи")
         
         try:
-            # Полностью удаляем товар из БД
+            # Удаляем из памяти (оригинал удаляется, водянка остаётся)
+            hashes_manager.remove_original(product.original_hash)
+            
+            # Удаляем файлы
+            for ext in ['jpeg', 'jpg', 'png', 'gif', 'webp', 'bmp', 'tiff']:
+                original_path = os.path.join(ServerConfig.ORIGINALS_FOLDER, f"{product.photo_url}.{ext}")
+                watermarked_path = os.path.join(ServerConfig.WATERMARKED_FOLDER, f"{product.photo_url}.{ext}")
+                if os.path.exists(original_path):
+                    os.remove(original_path)
+                if os.path.exists(watermarked_path):
+                    os.remove(watermarked_path)
+            
             db.session.delete(product)
             db.session.commit()
             
@@ -443,6 +459,32 @@ class DatabaseManager:
             db.session.rollback()
             raise ValueError(f'Ошибка удаления товара: {str(e)}')
     
+    # ========== РАБОТА С ХЕШАМИ ==========
+    
+    def check_image_can_be_sold(self, file_hash: str, user_id: str) -> tuple[bool, str, str | None]:
+        """Проверяет, может ли пользователь выставить изображение"""
+        return hashes_manager.check_and_get_owner(file_hash, user_id)
+    
+    def add_new_product_to_memory(self, original_hash: str, watermarked_hash: str, owner_id: str):
+        """Добавляет хеши нового товара в память"""
+        hashes_manager.add_new_product(original_hash, watermarked_hash, owner_id)
+    
+    def update_product_owner_in_memory(self, original_hash: str, new_owner_id: str):
+        """Обновляет владельца товара в памяти"""
+        hashes_manager.update_owner(original_hash, new_owner_id)
+    
+    def remove_product_from_memory(self, original_hash: str):
+        """Удаляет оригинал из памяти (водянка остаётся)"""
+        hashes_manager.remove_original(original_hash)
+    
+    def is_watermarked_hash(self, file_hash: str) -> bool:
+        """Проверяет, является ли хеш водяной версией"""
+        return hashes_manager.is_watermarked(file_hash)
+    
+    def load_hashes_into_memory(self, app):
+        """Загружает все хеши из БД в память"""
+        hashes_manager.load_from_db(app)
+
     # ========== ИСТОРИЯ ПОКУПОК/ПРОДАЖ ==========
     
     def get_user_purchases(self, account_id: str, page: int = 1, per_page: int = 20):

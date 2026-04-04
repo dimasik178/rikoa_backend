@@ -71,14 +71,14 @@ class Account(db.Model):
         data['products_for_sale'] = [
             product.to_dict_for_creator() 
             for product in self.products_for_sale 
-            if not product.is_sold
+            if product.on_sale
         ]
         
         # Купленные товары
         data['purchased_products'] = [
             product.to_dict_for_owner()
             for product in self.owned_products 
-            if product.is_sold
+            if not product.on_sale
         ]
         
         # История баланса
@@ -120,8 +120,12 @@ class Product(db.Model):
     price = db.Column(db.Integer, nullable=False)          # Цена товара
     created_at = db.Column(db.DateTime, default=utc_now)
     
+    # 🔐 ЗАКРЕПЛЕНИЕ АВТОРСКИХ ПРАВ
+    original_hash = db.Column(db.String(64), nullable=False, unique=True)
+    watermarked_hash = db.Column(db.String(64), nullable=False, unique=True)
+    
     # 📍 СТАТУС
-    is_sold = db.Column(db.Boolean, default=False)         # Продан ли товар
+    on_sale = db.Column(db.Boolean, default=True)  # True = выставлен на продажу
     purchased_at = db.Column(db.DateTime, nullable=True)   # Дата покупки
     
     # Relationships
@@ -130,8 +134,8 @@ class Product(db.Model):
     purchases = relationship("Purchase", back_populates="product")
     
     def to_dict_public(self):
-        """Общий вид карточки (для главной страницы) - только непроданные товары"""
-        if self.is_sold:
+        """Для главной страницы — только товары в продаже"""
+        if not self.on_sale:
             return None
         
         return {
@@ -146,8 +150,8 @@ class Product(db.Model):
         }
     
     def to_dict_detailed_public(self):
-        """Подробный вид для всех пользователей (непроданные товары)"""
-        if self.is_sold:
+        """Подробно для всех — только если в продаже"""
+        if not self.on_sale:
             return None
             
         return {
@@ -164,7 +168,7 @@ class Product(db.Model):
         }
     
     def to_dict_for_creator(self):
-        """Данные для продавца (владельца товара на продаже)"""
+        """Для продавца (владельца) — всегда доступно"""
         return {
             'id': self.id,
             'title': self.title,
@@ -172,11 +176,11 @@ class Product(db.Model):
             'price': self.price,
             'photo_url': f"/api/images/original/{self.photo_url}",
             'created_at': self.created_at.isoformat(),
-            'is_sold': self.is_sold,
+            'on_sale': self.on_sale,
         }
     
     def to_dict_for_owner(self):
-        """Данные для покупателя (владельца купленного товара)"""
+        """Для покупателя (владельца купленного товара)"""
         return {
             'id': self.id,
             'title': self.title,
@@ -188,6 +192,7 @@ class Product(db.Model):
                 'nickname': self.creator.nickname
             },
             'purchased_at': self.purchased_at.isoformat() if self.purchased_at else None,
+            'on_sale': self.on_sale,
         }
 
 class Purchase(db.Model):

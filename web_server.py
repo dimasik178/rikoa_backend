@@ -5,6 +5,8 @@ import os
 import datetime
 from datetime import timezone, datetime
 import uuid
+import logging
+import hashlib
 from PIL import Image
 from functools import wraps
 from config import ServerConfig, ApiConfig, JWTConfig, MARKET_VERSION
@@ -12,7 +14,6 @@ from search_engine import search_engine
 from jwt_manager import jwt_manager
 from dotenv import load_dotenv
 from watermark import add_watermark
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,10 @@ def create_app():
     
     # Инициализация базы данных
     db_manager.init_app(app)
+
+    # Загружаем хеши товаров в память при старте
+    with app.app_context():
+        db_manager.load_hashes_into_memory(app)
     
     # ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
     
@@ -88,30 +93,53 @@ def create_app():
         return '.' in filename and \
                filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
     
-    def process_uploaded_image(file):
-        """Обрабатывает загруженное изображение: сохраняет оригинал и создает копию с водяным знаком"""
+    def compute_file_hash_from_stream(file) -> str:
+        """Вычисляет SHA256 хеш из файлового потока"""
+        hash_sha256 = hashlib.sha256()
+        file.seek(0)
+        for chunk in iter(lambda: file.read(8192), b""):
+            hash_sha256.update(chunk)
+        file.seek(0)
+        return hash_sha256.hexdigest()
+
+    def compute_file_hash_from_path(file_path: str) -> str:
+        """Вычисляет SHA256 хеш файла по пути"""
+        hash_sha256 = hashlib.sha256()
+        with open(file_path, 'rb') as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                hash_sha256.update(chunk)
+        return hash_sha256.hexdigest()
+
+    def process_uploaded_image(file, current_user_id):
         try:
             file.seek(0, os.SEEK_END)
             file_size = file.tell()
             file.seek(0)
             
-            if file_size > 15 * 1024 * 1024:
-                return None, "Файл слишком большой (максимум 15MB)"
+            if file_size > ServerConfig.MAX_CONTENT_LENGTH:
+                return None, "Файл слишком большой (максимум 16MB)"
             
+            # 1. Хеш оригинала
+            original_hash = compute_file_hash_from_stream(file)
+            
+            # 2. Проверяем через репозиторий
+            can_proceed, msg, stored_owner = db_manager.check_image_can_be_sold(original_hash, current_user_id)
+            if not can_proceed:
+                return None, msg
+            
+            # 3. Открываем изображение
             image = Image.open(file)
             width, height = image.size
             
-            if width > app.config['MAX_IMAGE_DIMENSION'] or height > app.config['MAX_IMAGE_DIMENSION']:
-                return None, f"Размеры изображения слишком большие (максимум {app.config['MAX_IMAGE_DIMENSION']}x{app.config['MAX_IMAGE_DIMENSION']})"
+            if width > ServerConfig.MAX_IMAGE_DIMENSION or height > ServerConfig.MAX_IMAGE_DIMENSION:
+                return None, f"Размеры изображения слишком большие (максимум {ServerConfig.MAX_IMAGE_DIMENSION}x{ServerConfig.MAX_IMAGE_DIMENSION})"
             
             if image.format not in ['JPEG', 'PNG', 'GIF', 'WEBP', 'BMP', 'TIFF']:
                 return None, "Неподдерживаемый формат изображения"
             
-            # Генерируем уникальный ID для файла
+            # 4. Генерируем ID и сохраняем оригинал
             file_id = str(uuid.uuid4())
             original_extension = image.format.lower()
-            
-            # Пути для сохранения
             original_filename = f"{file_id}.{original_extension}"
             original_path = os.path.join(ServerConfig.ORIGINALS_FOLDER, original_filename)
             watermarked_path = os.path.join(ServerConfig.WATERMARKED_FOLDER, original_filename)
@@ -126,16 +154,28 @@ def create_app():
                     image = background
                 image.save(original_path, optimize=True, quality=85)
             
-            # Создаем копию с водяным знаком
+            # 5. Создаём водяную копию
             if not add_watermark(original_path, watermarked_path):
                 return None, "Ошибка добавления водяного знака"
+            
+            # 6. Хеш водяной версии
+            watermarked_hash = compute_file_hash_from_path(watermarked_path)
+            
+            # 7. Проверяем водянку
+            if db_manager.is_watermarked_hash(watermarked_hash):
+                os.remove(original_path)
+                os.remove(watermarked_path)
+                return None, "Это изображение уже выставлялось ранее"
             
             image.close()
             
             return {
                 'file_id': file_id,
                 'original_path': original_path,
-                'watermarked_path': watermarked_path
+                'watermarked_path': watermarked_path,
+                'original_hash': original_hash,
+                'watermarked_hash': watermarked_hash,
+                'action': msg  # 'new' или 'relist'
             }, None
             
         except Exception as e:
@@ -329,8 +369,8 @@ def create_app():
     def get_products():
         page = request.args.get('page', 1, type=int)
         
-        # Получаем пагинацию только непроданных товаров
-        pagination = db_manager.get_products_paginated(
+        # Получаем пагинацию товаров на продаже
+        pagination = db_manager.get_products_on_sale_paginated(
             page=page, 
             per_page=ApiConfig.PRODUCTS_PER_PAGE
         )
@@ -364,95 +404,108 @@ def create_app():
         if not product:
             return jsonify({'error': 'Товар не найден'}), 404
         
-        # Если товар продан и нет токена - 404
-        if product.is_sold and not token:
-            return jsonify({'error': 'Товар не найден'}), 404
-        
+        # Без токена — только если товар в продаже
         if not token:
-            # Без токена - показываем только если товар не продан
-            if product.is_sold:
+            if not product.on_sale:
                 return jsonify({'error': 'Товар не найден'}), 404
             return jsonify(product.to_dict_detailed_public())
         
         # С токеном
-        payload = jwt_manager.decode_token(token)
-        user_id = payload.get('sub')
-        account = db_manager.get_account_by_id(user_id)
-        
-        if not account:
-            return jsonify({'error': 'Пользователь не найден'}), 401
-        
-        # Проверяем права доступа
-        is_creator = product.creator_id == account.id
-        is_owner = product.owner_id == account.id
-        
-        if product.is_sold:
-            # Проданный товар видят только создатель и покупатель
-            if not (is_creator or is_owner):
+        try:
+            payload = jwt_manager.decode_token(token)
+            user_id = payload.get('sub')
+            account = db_manager.get_account_by_id(user_id)
+            
+            if not account:
                 return jsonify({'error': 'Товар не найден'}), 404
             
-            if is_owner:
-                return jsonify(product.to_dict_for_owner())
-            else:
-                # Создатель видит проданный товар
+            is_creator = product.creator_id == account.id
+            is_owner = product.owner_id == account.id
+            
+            # Владелец видит всё
+            if is_creator or is_owner:
+                if is_owner and product.purchased_at:
+                    return jsonify(product.to_dict_for_owner())
                 return jsonify(product.to_dict_for_creator())
-        else:
-            # Непроданный товар
-            if is_creator:
-                return jsonify(product.to_dict_for_creator())
-            else:
-                return jsonify(product.to_dict_detailed_public())
+            
+            # Не владелец — только если в продаже
+            if not product.on_sale:
+                return jsonify({'error': 'Товар не найден'}), 404
+            
+            return jsonify(product.to_dict_detailed_public())
+            
+        except Exception:
+            return jsonify({'error': 'Товар не найден'}), 404
     
     # 8. Создание товара
     @app.route('/api/products', methods=['POST'])
     @token_required
     def create_product(current_account):
-        if request.content_type and 'multipart/form-data' in request.content_type:
-            if 'image' not in request.files:
-                return jsonify({'error': 'Файл изображения не предоставлен'}), 400
-            
-            file = request.files['image']
-            if file.filename == '':
-                return jsonify({'error': 'Файл не выбран'}), 400
-            
-            if not allowed_file(file.filename):
-                return jsonify({'error': 'Неподдерживаемый формат файла'}), 400
-            
-            title = request.form.get('title')
-            price = request.form.get('price')
-            description = request.form.get('description', '')
-            
-            if not all([title, price]):
-                return jsonify({'error': 'Отсутствуют обязательные поля'}), 400
-            
-            try:
-                price = int(price)
-            except ValueError:
-                return jsonify({'error': 'Цена должна быть числом'}), 400
-            
-            # Обработка изображения
-            image_info, error = process_uploaded_image(file)
-            if error:
-                return jsonify({'error': f'Ошибка обработки изображения: {error}'}), 400
-            
-            try:
-                product = db_manager.create_product(
-                    creator_id=current_account.id,
-                    title=title,
-                    price=price,
-                    description=description,
-                    photo_url=image_info['file_id']
-                )
-                
-                return jsonify(product.to_dict_for_creator()), 201
-                
-            except ValueError as e:
-                return jsonify({'error': str(e)}), 400
-            except Exception as e:
-                return jsonify({'error': 'Ошибка создания товара'}), 500
-            
-        else:
+        if not (request.content_type and 'multipart/form-data' in request.content_type):
             return jsonify({'error': 'Используйте form-data для загрузки изображений'}), 400
+        
+        if 'image' not in request.files:
+            return jsonify({'error': 'Файл изображения не предоставлен'}), 400
+        
+        file = request.files['image']
+        if file.filename == '':
+            return jsonify({'error': 'Файл не выбран'}), 400
+        
+        if not allowed_file(file.filename):
+            return jsonify({'error': 'Неподдерживаемый формат файла'}), 400
+        
+        title = request.form.get('title')
+        price = request.form.get('price')
+        description = request.form.get('description', '')
+        
+        if not all([title, price]):
+            return jsonify({'error': 'Отсутствуют обязательные поля'}), 400
+        
+        try:
+            price = int(price)
+        except ValueError:
+            return jsonify({'error': 'Цена должна быть числом'}), 400
+        
+        # Обрабатываем изображение
+        image_info, error = process_uploaded_image(file, current_account.id)
+        if error:
+            return jsonify({'error': error}), 400
+        
+        try:
+            if image_info['action'] == 'relist':
+                # Перепродажа существующего товара
+                product = db_manager.relist_product(
+                    original_hash=image_info['original_hash'],
+                    owner_id=current_account.id
+                )
+                return jsonify(product.to_dict_for_creator()), 200
+            
+            # Новый товар
+            product = db_manager.create_product(
+                creator_id=current_account.id,
+                owner_id=current_account.id,
+                title=title,
+                price=price,
+                description=description,
+                photo_url=image_info['file_id'],
+                original_hash=image_info['original_hash'],
+                watermarked_hash=image_info['watermarked_hash'],
+                on_sale=True
+            )
+            
+            # Добавляем в память
+            db_manager.add_new_product_to_memory(
+                image_info['original_hash'],
+                image_info['watermarked_hash'],
+                current_account.id
+            )
+            
+            return jsonify(product.to_dict_for_creator()), 201
+            
+        except ValueError as e:
+            return jsonify({'error': str(e)}), 400
+        except Exception as e:
+            return jsonify({'error': 'Ошибка создания товара'}), 500
     
     # 9. Покупка товара
     @app.route('/api/products/<product_id>/buy', methods=['POST'])
@@ -602,7 +655,7 @@ def create_app():
             product = db_manager.get_product_by_photo_url(file_id)
             
             # Если товар не существует или продан - 404
-            if not product or product.is_sold:
+            if not product or not product.on_sale:
                 return jsonify({'error': 'Изображение не найдено'}), 404
             
             # Ищем файл с водяным знаком
