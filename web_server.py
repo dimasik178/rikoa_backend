@@ -91,7 +91,7 @@ def create_app():
     
     def allowed_file(filename):
         return '.' in filename and \
-               filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
+               filename.rsplit('.', 1)[1].upper() in app.config['ALLOWED_EXTENSIONS']
     
     def compute_file_hash_from_stream(file) -> str:
         """Вычисляет SHA256 хеш из файлового потока"""

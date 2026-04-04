@@ -4,6 +4,7 @@
 from PIL import Image, ImageDraw, ImageFont
 import os
 import logging
+import random
 from config import WatermarkConfig
 
 logger = logging.getLogger(__name__)
@@ -29,7 +30,8 @@ def add_watermark(image_path: str, output_path: str) -> bool:
         draw = ImageDraw.Draw(watermark)
         
         # Рассчитываем размер шрифта (5% от ширины изображения)
-        font_size = int(img.width * WatermarkConfig.WATERMARK_FONT_SIZE_RATIO)
+        font_size = max(WatermarkConfig.WATERMARK_MIN_FONT_SIZE, 
+                        int(img.width * WatermarkConfig.WATERMARK_FONT_SIZE_RATIO))
         
         # Пути к шрифтам в порядке приоритета
         font_paths = [
@@ -57,8 +59,12 @@ def add_watermark(image_path: str, output_path: str) -> bool:
         if font is None:
             logger.warning("Не удалось загрузить ни один шрифт, используется дефолтный")
             font = ImageFont.load_default()
+        
         # Текст водяного знака
-        text = WatermarkConfig.WATERMARK_TEXT
+        if img.width < 100:
+            text = "DEMO"
+        else:
+            text = WatermarkConfig.WATERMARK_TEXT
         
         # Позиция: центр изображения
         bbox = draw.textbbox((0, 0), text, font=font)
@@ -67,9 +73,40 @@ def add_watermark(image_path: str, output_path: str) -> bool:
         x = (img.width - text_width) // 2
         y = (img.height - text_height) // 2
         
-        # Рисуем текст с прозрачностью
+        # Основной цвет текста
         alpha = int(255 * WatermarkConfig.WATERMARK_OPACITY)
-        draw.text((x, y), text, fill=(255, 255, 255, alpha), font=font)
+        text_color = (255, 255, 255, alpha)
+        
+        # Цвет обводки - негатив от фона (вычисляем из центра изображения)
+        center_x = img.width // 2
+        center_y = img.height // 2
+        bg_color = img.getpixel((center_x, center_y))
+        
+        # Негатив цвета фона
+        outline_color = (255 - bg_color[0], 255 - bg_color[1], 255 - bg_color[2], alpha)
+        
+        # Рисуем обводку (8 направлений + случайные смещения)
+        outline_offsets = [
+            (-2, -2), (-2, -1), (-2, 0), (-2, 1), (-2, 2),
+            (-1, -2), (-1, -1), (-1, 0), (-1, 1), (-1, 2),
+            (0, -2), (0, -1), (0, 1), (0, 2),
+            (1, -2), (1, -1), (1, 0), (1, 1), (1, 2),
+            (2, -2), (2, -1), (2, 0), (2, 1), (2, 2),
+        ]
+        
+        # Добавляем случайные хаотичные смещения
+        for _ in range(random.randint(5, 15)):
+            ox = random.randint(-3, 3)
+            oy = random.randint(-3, 3)
+            if (ox, oy) not in outline_offsets:
+                outline_offsets.append((ox, oy))
+        
+        # Рисуем обводку
+        for offset_x, offset_y in outline_offsets:
+            draw.text((x + offset_x, y + offset_y), text, fill=outline_color, font=font)
+        
+        # Рисуем основной текст поверх обводки
+        draw.text((x, y), text, fill=text_color, font=font)
         
         # Объединяем изображения
         combined = Image.alpha_composite(img, watermark)
