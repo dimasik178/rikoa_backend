@@ -38,8 +38,10 @@ sudo docker build -t art-market .
 sudo docker run -d \
   --name art-market \
   -p 5000:5000 \
-  -v art-market-uploads:/app/uploads \
-  -v art-market-data:/app/instance \
+  -v "$PWD/instance:/app/instance" \
+  -v "$PWD/uploads:/app/uploads" \
+  -v "$PWD/photo_examples:/app/photo_examples" \
+  -v "$PWD/fonts:/app/fonts" \
   art-market
 ```
 
@@ -356,4 +358,6 @@ sudo docker rmi school-art-market
 sudo docker volume ls
 # Удалить том
 sudo docker volume rm art-market-data
+# Посмотреть подробную информацию о томе
+sudo docker volume inspect art-market-data # Mountpoint - Путь куда вмонтированна папка
 ```
