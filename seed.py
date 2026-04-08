@@ -5,7 +5,7 @@ import hashlib
 from PIL import Image
 from web_server import create_app
 from database import db_manager
-from config import SeedConfig, MarketConfig
+from config import SeedConfig, MarketConfig, ServerConfig
 from watermark import add_watermark
 import logging
 
@@ -70,7 +70,7 @@ def process_uploaded_image_for_seed(file, originals_folder, watermarked_folder):
         if width > ServerConfig.MAX_IMAGE_DIMENSION or height > ServerConfig.MAX_IMAGE_DIMENSION:
             return None, "Размеры изображения слишком большие"
         
-        if image.format not in ServerConfig.ALLOWED_EXTENSIONS:
+        if image.format.upper() not in ServerConfig.ALLOWED_EXTENSIONS:
             return None, "Неподдерживаемый формат изображения"
         
         file_id = str(uuid.uuid4())
@@ -361,7 +361,8 @@ def seed_database():
         bonus_count = 0
         for user in users:
             try:
-                if user.balance < MarketConfig.DAILY_BONUS_MAX_BALANCE:
+                # Проверяем флаг can_claim_daily_bonus и баланс
+                if user.can_claim_daily_bonus and user.balance < MarketConfig.DAILY_BONUS_MAX_BALANCE:
                     db_manager.claim_daily_bonus(user.id)
                     bonus_count += 1
             except:
@@ -400,5 +401,4 @@ def seed_database():
 
 
 if __name__ == "__main__":
-    from config import ServerConfig
     seed_database()

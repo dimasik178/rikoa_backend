@@ -108,6 +108,7 @@ class BankruptcyManager:
             db.session.rollback()
             raise e
 
+
 class ProductManager:
     """Управление товарами"""
     
@@ -168,18 +169,13 @@ class BonusManager:
     def can_claim_daily_bonus(account: Account) -> tuple[bool, str]:
         """Проверяет, может ли пользователь получить ежедневный бонус"""
         
-        # Проверяем баланс
+        # 1. Проверяем флаг cooldown (можно получать только 1 раз в день)
+        if not account.can_claim_daily_bonus:
+            return False, "Бонус можно получать только 1 раз в день."
+        
+        # 2. Проверяем баланс
         if account.balance >= MarketConfig.DAILY_BONUS_MAX_BALANCE:
             return False, f"Баланс превышает лимит для получения бонуса ({MarketConfig.DAILY_BONUS_MAX_BALANCE} AC)"
-        
-        # Проверяем, получал ли бонус сегодня
-        if account.last_daily_bonus:
-            # Сравниваем даты (без времени)
-            last_bonus_date = account.last_daily_bonus.date()
-            today = datetime.utcnow().date()
-            
-            if last_bonus_date == today:
-                return False, "Сегодня бонус уже получен"
         
         return True, ""
     
@@ -200,6 +196,9 @@ class BonusManager:
             account.total_earned += bonus
             account.last_daily_bonus = datetime.utcnow()
             
+            # Запрещаем повторное получение бонуса до следующего дня
+            account.can_claim_daily_bonus = False
+            
             db.session.commit()
             
             return {
@@ -211,6 +210,17 @@ class BonusManager:
         except Exception as e:
             db.session.rollback()
             raise ValueError(f"Ошибка начисления бонуса: {str(e)}")
+    
+    @staticmethod
+    def reset_daily_bonus_for_all():
+        """Сбрасывает can_claim_daily_bonus для всех пользователей (вызывается раз в день)"""
+        try:
+            Account.query.update({Account.can_claim_daily_bonus: True})
+            db.session.commit()
+            return True
+        except Exception as e:
+            db.session.rollback()
+            raise e
 
 
 class DatabaseManager:
@@ -286,6 +296,11 @@ class DatabaseManager:
             raise ValueError("Пользователь не найден")
         
         return BonusManager.claim_daily_bonus(account)
+    
+    @staticmethod
+    def reset_all_daily_bonuses():
+        """Сбрасывает can_claim_daily_bonus для всех пользователей (вызывается раз в день)"""
+        return BonusManager.reset_daily_bonus_for_all()
     
     # ========== ТОВАРЫ ==========
     
@@ -423,7 +438,7 @@ class DatabaseManager:
         return TransactionManager.execute_transaction(transaction)
     
     def remove_product(self, product_id: str, seller_id: str) -> dict:
-        """Удаляет товар (только если не в продаже)"""
+        """Удаляет товар (снимает с продажи и удаляет)"""
         product = self.get_product(product_id)
         if not product:
             raise ValueError("Товар не найден")
@@ -431,11 +446,12 @@ class DatabaseManager:
         if product.owner_id != seller_id:
             raise ValueError("Только владелец может удалить товар")
         
-        if product.on_sale:
-            raise ValueError("Сначала снимите товар с продажи")
-        
         try:
-            # Удаляем из памяти (оригинал удаляется, водянка остаётся)
+            # Если товар в продаже - снимаем
+            if product.on_sale:
+                product.on_sale = False
+            
+            # Удаляем из памяти
             hashes_manager.remove_original(product.original_hash)
             
             # Удаляем файлы

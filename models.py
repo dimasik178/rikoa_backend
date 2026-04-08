@@ -36,6 +36,7 @@ class Account(db.Model):
     
     # 🎁 БОНУСЫ
     last_daily_bonus = db.Column(db.DateTime, nullable=True)  # Дата последнего получения бонуса
+    can_claim_daily_bonus = db.Column(db.Boolean, default=True)  # Может ли получить бонус
     
     # 📊 ИСТОРИЯ БАЛАНСА (массив 30 чисел)
     balance_history = db.Column(db.Text, default='[]')  # JSON: массив балансов за 30 дней

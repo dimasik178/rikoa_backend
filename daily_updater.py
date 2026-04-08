@@ -12,7 +12,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def update_daily_data():
-    """Ежедневное обновление: обновляет историю баланса и сбрасывает cooldown банкротства"""
+    """Ежедневное обновление: обновляет историю баланса, сбрасывает cooldown банкротства и бонуса"""
     logger.info("🔄 Начало ежедневного обновления...")
     
     # Создаем приложение вручную, без контекста запроса
@@ -21,12 +21,17 @@ def update_daily_data():
         try:
             print(f"🔄 Начало ежедневного обновления в {datetime.now()}")
             
-            # 🔄 ШАГ 1: Сбрасываем cooldown банкротства для всех пользователей
+            # ШАГ 1: Сбрасываем cooldown банкротства
             logger.info("🔄 Сброс cooldown банкротства...")
             db_manager.reset_all_bankruptcy_cooldowns()
-            logger.info("✅ Cooldown банкротства сброшен для всех пользователей")
+            logger.info("✅ Cooldown банкротства сброшен")
             
-            # 🔄 ШАГ 2: Обновляем историю баланса для всех пользователей
+            # ШАГ 2: Сбрасываем cooldown бонуса
+            logger.info("🔄 Сброс cooldown бонуса...")
+            db_manager.reset_all_daily_bonuses()
+            logger.info("✅ Cooldown бонуса сброшен")
+            
+            # ШАГ 3: Обновляем историю баланса
             logger.info("🔄 Обновление истории баланса...")
             updated_count = db_manager.update_all_balance_histories()
             logger.info(f"✅ Обновлена история баланса для {updated_count} пользователей")

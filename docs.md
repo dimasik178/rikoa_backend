@@ -1,4 +1,4 @@
-## 📋 Market API - Документация (Версия 4.1.1)
+## 📋 Market API - Документация (Версия 4.1.2)
 
 **Базовый URL:** `http://localhost:5000/api`
 
@@ -49,7 +49,7 @@ Authorization: Bearer <access_token>
 {
     "status": "healthy",
     "timestamp": "2026-04-04T17:34:39.730584",
-    "version": "4.1"
+    "version": "4.1.2"
 }
 ```
 
@@ -165,6 +165,7 @@ Authorization: Bearer <access_token>
     "total_earned": 200,
     "bankruptcy_count": 0,
     "can_declare_bankruptcy": true,
+    "can_claim_daily_bonus": true,
     "products_for_sale": [
         {
             "id": "85164644-1130-4058-9c6d-a80b78dcf595",
@@ -300,7 +301,7 @@ Authorization: Bearer <access_token>
 - `description` (до 1000 символов, опционально)
 - `image` (файл изображения)
 
-**Ответ при создании нового товара (201):**
+**Ответ при создании нового товара или перепродаже (201):**
 ```json
 {
     "id": "85164644-1130-4058-9c6d-a80b78dcf595",
@@ -370,7 +371,7 @@ Authorization: Bearer <access_token>
 
 ---
 
-### 10. 🗑️ Удаление товара
+### 10. 🗑️ Снятие товара с продажи (удаление)
 **POST** `/products/{product_id}/remove`  
 **Требуется токен**
 
@@ -382,7 +383,7 @@ Authorization: Bearer <access_token>
 }
 ```
 *Примечания:*
-- *Удалить можно только товар, который не в продаже (`on_sale = false`)*
+- *Удалить можно только товар, который на продаже (`on_sale = True`)*
 - *После удаления оригинал изображения больше не привязан ни к кому, но водяной знак остаётся в чёрном списке навсегда*
 
 **Ошибки:**
