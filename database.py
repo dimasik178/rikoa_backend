@@ -465,6 +465,9 @@ class DatabaseManager:
             if product.on_sale:
                 product.on_sale = False
             
+            # Отвязываем покупки от товара (устанавливаем product_id = None)
+            Purchase.query.filter_by(product_id=product_id).update({'product_id': None})
+            
             # Удаляем из памяти
             hashes_manager.remove_original(product.original_hash)
             

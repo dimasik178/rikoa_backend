@@ -215,7 +215,7 @@ class Purchase(db.Model):
     id = db.Column(db.String(36), primary_key=True, default=generate_uuid)
     buyer_id = db.Column(db.String(36), db.ForeignKey('accounts.id'), nullable=False)
     seller_id = db.Column(db.String(36), db.ForeignKey('accounts.id'), nullable=False)
-    product_id = db.Column(db.String(36), db.ForeignKey('products.id'), nullable=False)
+    product_id = db.Column(db.String(36), db.ForeignKey('products.id', ondelete='SET NULL'), nullable=True)
     
     # 📊 ДАННЫЕ О ПОКУПКЕ
     product_title = db.Column(db.String(200), nullable=False)  # Копия названия товара
