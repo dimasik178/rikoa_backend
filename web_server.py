@@ -5,7 +5,7 @@ import os
 import datetime
 from datetime import timezone, datetime
 import uuid
-import logging
+import logging 
 import hashlib
 from PIL import Image
 from functools import wraps
@@ -36,6 +36,43 @@ def create_app():
         raise ValueError(f"❌ Отсутствуют в .env: {', '.join(missing)}")
     
     app = Flask(__name__)
+
+    ############################################################################################
+    ########## Логирование времени выполнения всех роутов (для активации раскоменить) ##########
+    ############################################################################################
+    
+    # import inspect, time
+    # logs = []
+    # def log_time(message="", get_data=None):
+    #     def wraped(func):
+    #         @wraps(func)
+    #         def decorated(*args, **kwargs):
+    #             start = time.time()
+    #             start_line = func.__code__.co_firstlineno
+    #             res = func(*args, **kwargs)
+    #             logs.append((time.time() - start, func.__name__, start_line, start_line + len(inspect.getsourcelines(func)[0]) - 1))
+    #             if message:
+    #                 print(message, end=" : ")
+    #             if get_data is True:
+    #                 print(logs[-1])
+    #             return res
+    #         return decorated
+    #     return wraped  
+
+    # def log_time_all(app):
+    #     """Автоматически оборачивает все view функции в декоратор"""
+    #     original_add_url_rule = app.add_url_rule
+        
+    #     def add_url_rule_with_logging(self, rule, endpoint=None, view_func=None, **options):
+    #         if view_func:
+    #             # Оборачиваем view_func в ваш декоратор
+    #             view_func = log_time(rule, get_data=True)(view_func)
+    #         return original_add_url_rule(rule, endpoint, view_func, **options)
+    #     app.add_url_rule = add_url_rule_with_logging.__get__(app, type(app))
+    #     return app
+    # Использование
+    # app = log_time_all(app)  # Теперь все роуты автоматически залогированы
+    ############################################################################################
     
     # Инициализация CORS
     CORS(app, resources={
@@ -53,6 +90,7 @@ def create_app():
     if os.getenv('FLASK_ENV') == 'development':
         app.config['DEBUG'] = True
         app.config['TESTING'] = True
+        logger.setLevel(logging.DEBUG)
     else:
         app.config['DEBUG'] = False
         app.config['TESTING'] = False
@@ -473,10 +511,13 @@ def create_app():
         
         try:
             if image_info['action'] == 'relist':
-                # Перепродажа существующего товара
+                # Перепродажа существующего изображения
                 product = db_manager.relist_product(
                     original_hash=image_info['original_hash'],
-                    owner_id=current_account.id
+                    owner_id=current_account.id,
+                    title=title,
+                    price=price,
+                    description=description
                 )
                 return jsonify(product.to_dict_for_creator()), 200
             
@@ -505,6 +546,7 @@ def create_app():
         except ValueError as e:
             return jsonify({'error': str(e)}), 400
         except Exception as e:
+            app.logger.error(f"Create error: {str(e)}")
             return jsonify({'error': 'Ошибка создания товара'}), 500
     
     # 9. Покупка товара

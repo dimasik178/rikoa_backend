@@ -42,8 +42,22 @@ class Account(db.Model):
     balance_history = db.Column(db.Text, default='[]')  # JSON: массив балансов за 30 дней
 
     # Relationships
-    products_for_sale = relationship("Product", foreign_keys="Product.creator_id", back_populates="creator")
-    owned_products = relationship("Product", foreign_keys="Product.owner_id", back_populates="owner")
+    products_for_sale = relationship(
+        "Product", 
+        foreign_keys="Product.owner_id",
+        primaryjoin="and_(Account.id == Product.owner_id, Product.on_sale == True)",
+        viewonly=True,
+        overlaps="purchased_products"
+    )
+    
+    purchased_products = relationship(
+        "Product", 
+        foreign_keys="Product.owner_id",
+        primaryjoin="and_(Account.id == Product.owner_id, Product.on_sale == False)",
+        viewonly=True,
+        overlaps="products_for_sale"
+    )
+    
     purchases_as_buyer = relationship("Purchase", foreign_keys="Purchase.buyer_id", back_populates="buyer")
     purchases_as_seller = relationship("Purchase", foreign_keys="Purchase.seller_id", back_populates="seller")
     
@@ -68,22 +82,21 @@ class Account(db.Model):
         """Информация с товарами и покупками"""
         data = self.to_dict()
         
-        # Товары на продаже (не проданные)
+        # Товары на продаже
         data['products_for_sale'] = [
             product.to_dict_for_creator() 
-            for product in self.products_for_sale 
-            if product.on_sale
+            for product in self.products_for_sale
         ]
         
-        # Купленные товары
+        # Купленные товары (не в продаже)
         data['purchased_products'] = [
             product.to_dict_for_owner()
-            for product in self.owned_products 
-            if not product.on_sale
+            for product in self.purchased_products
         ]
         
         # История баланса
         data['balance_history'] = self.get_balance_history_array()
+        data['can_claim_daily_bonus'] = self.can_claim_daily_bonus
         
         return data
     
@@ -130,8 +143,8 @@ class Product(db.Model):
     purchased_at = db.Column(db.DateTime, nullable=True)   # Дата покупки
     
     # Relationships
-    creator = relationship("Account", foreign_keys=[creator_id], back_populates="products_for_sale")
-    owner = relationship("Account", foreign_keys=[owner_id], back_populates="owned_products")
+    creator = relationship("Account", foreign_keys=[creator_id])
+    owner = relationship("Account", foreign_keys=[owner_id])
     purchases = relationship("Purchase", back_populates="product")
     
     def to_dict_public(self):

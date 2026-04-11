@@ -81,14 +81,38 @@ class ProductSearchEngine:
         # Триграммный индекс
         self.trigram_index = TrigramIndex()
         self.products_indexed = False
+        self.products_list = []
+        self.cached_product_ids = set()
     
     def build_index(self, products: List[Product]):
         """Строит поисковый индекс для товаров"""
+        self.trigram_index = TrigramIndex()
+        self.products_list = products
+        self.cached_product_ids = {p.id for p in products}
+        
         for idx, product in enumerate(products):
             search_text = self._prepare_search_text(product)
             self.trigram_index.add_document(search_text, idx)
         self.products_indexed = True
-        self.products_list = products
+    
+    def is_index_valid(self, products: List[Product]) -> bool:
+        """Проверяет, актуален ли индекс для текущего списка товаров"""
+        if not self.products_indexed:
+            return False
+        
+        if len(products) != len(self.products_list):
+            return False
+        
+        current_ids = {p.id for p in products}
+        if current_ids != self.cached_product_ids:
+            return False
+        
+        return True
+    
+    def ensure_index(self, products: List[Product]):
+        """Гарантирует, что индекс актуален для списка товаров"""
+        if not self.is_index_valid(products):
+            self.build_index(products)
     
     def _prepare_search_text(self, product: Product) -> str:
         """Подготавливает поисковый текст из товара"""
@@ -123,9 +147,7 @@ class ProductSearchEngine:
         if not search_term:
             return []
         
-        # Если индекс еще не построен - строим
-        if not self.products_indexed or len(products) != len(self.products_list):
-            self.build_index(products)
+        self.ensure_index(products)
         
         search_lower = search_term.lower()
         search_words = [word for word in search_lower.split() if word]
@@ -139,7 +161,9 @@ class ProductSearchEngine:
         # Этап 2: Точный поиск по найденным кандидатам
         detailed_results = []
         
-        for doc_id, trigram_score in trigram_results[:max_results * 2]:  # Берем больше для фильтрации
+        for doc_id, trigram_score in trigram_results[:max_results * 2]:
+            if doc_id >= len(products):
+                continue
             product = products[doc_id]
             search_text = self._prepare_search_text(product).lower()
             
@@ -169,7 +193,7 @@ class ProductSearchEngine:
     
     def _trigram_search(self, search_term: str, threshold: float) -> List[Tuple[int, float]]:
         """Поиск по триграммному индексу"""
-        return self.trigram_index.search(search_term, threshold / 100)  # threshold для триграмм ниже
+        return self.trigram_index.search(search_term, threshold / 100)
     
     def _fallback_search(self, products: List[Product], search_lower: str, 
                         search_words: List[str], threshold: float, 

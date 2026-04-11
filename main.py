@@ -56,12 +56,23 @@ def main():
     # Сначала создаем Flask приложение (для инициализации БД)
     app = create_app()
     
+    # Загружаем поисковый индекс при старте
+    with app.app_context():
+        from search_engine import search_engine
+        from database import db_manager
+        products = db_manager.get_all_active_products()
+        if products:
+            search_engine.build_index(products)
+            print(f"🔍 Поисковый индекс загружен: {len(products)} товаров")
+        else:
+            print("🔍 Поисковый индекс пуст (нет товаров в продаже)")
+    
     # Теперь запускаем планировщик (после инициализации БД)
-    if not os.environ.get('WERKZEUG_RUN_MAIN'): # Основной процесс
+    if not os.environ.get('WERKZEUG_RUN_MAIN'):
         global scheduler_thread
         scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
         scheduler_thread.start()
-    else: # Избегаем дублирование запусков
+    else:
         print("🔄 Reloader process detected, scheduler not started")
     
     print("🚀 Market API Server starting...")

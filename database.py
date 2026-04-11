@@ -8,7 +8,7 @@ from config import MarketConfig, ServerConfig, ApiConfig
 import os
 import json
 import logging
-from decimal import Decimal
+from decimal import Decimal, ROUND_CEILING
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -132,7 +132,6 @@ class ProductManager:
         Рассчитывает комиссию и сумму продавцу
         Возвращает: (commission, seller_gets)
         
-        Использует Decimal для точного округления вверх:
         commission = ceil(price * 0.05)
         """
         # Используем Decimal для точных вычислений
@@ -141,10 +140,9 @@ class ProductManager:
         
         # commission = ceil(price * 0.05)
         commission_raw = price_dec * commission_percent
-        # Округление вверх: -(-commission_raw // 1)
-        commission = -(-commission_raw // Decimal('1'))
-        
-        seller_gets = price_dec - commission
+        # Округление вверх с помощью quantize
+        commission = int(commission_raw.quantize(Decimal('1'), rounding=ROUND_CEILING))
+        seller_gets = int(price_dec - commission)
         
         return int(commission), int(seller_gets)
     
@@ -340,21 +338,37 @@ class DatabaseManager:
         
         return product
     
-    def relist_product(self, original_hash: str, owner_id: str) -> Product:
+    def relist_product(self, original_hash: str, owner_id: str, title: str, price: int, description: str) -> Product:
         """Выставляет существующий товар на продажу (перепродажа)"""
-        product = Product.query.filter_by(
-            original_hash=original_hash,
-            owner_id=owner_id
-        ).first()
+        price = ProductManager.validate_price(price)
         
+        product = Product.query.filter_by(original_hash=original_hash).first()
         if not product:
-            raise ValueError("Товар не найден")
+            raise ValueError("Оригинал изображения не найден")
         
-        if product.on_sale:
-            raise ValueError("Товар уже выставлен на продажу")
+        if product.owner_id != owner_id:
+            raise ValueError("Вы не являетесь владельцем этого изображения")
         
+        ProductManager.check_seller_limit(owner_id)
+        
+        if len(title) < MarketConfig.MIN_TITLE_LENGTH:
+            raise ValueError(f"Название должно быть не менее {MarketConfig.MIN_TITLE_LENGTH} символов")
+        if len(title) > MarketConfig.MAX_TITLE_LENGTH:
+            raise ValueError(f"Название должно быть не более {MarketConfig.MAX_TITLE_LENGTH} символов")
+        if len(description) > MarketConfig.MAX_DESCRIPTION_LENGTH:
+            raise ValueError(f"Описание должно быть не более {MarketConfig.MAX_DESCRIPTION_LENGTH} символов")
+        
+        product.title = title
+        product.price = price
+        product.description = description
+        product.creator_id = owner_id
         product.on_sale = True
+        product.purchased_at = None
+        
         db.session.commit()
+        
+        from hashes_manager import hashes_manager
+        hashes_manager.update_owner(original_hash, owner_id)
         
         return product
     
