@@ -468,7 +468,7 @@ class DatabaseManager:
             # Отвязываем покупки от товара (устанавливаем product_id = None)
             Purchase.query.filter_by(product_id=product_id).update({'product_id': None})
             
-            # Удаляем из памяти
+            # Удаляем из памяти (товар становится бесхозным)
             hashes_manager.remove_original(product.original_hash)
             
             # Удаляем файлы
