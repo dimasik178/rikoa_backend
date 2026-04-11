@@ -82,7 +82,7 @@ class ServerConfig:
     UPLOAD_FOLDER = 'uploads'
     ORIGINALS_FOLDER = 'uploads/originals'      # Оригинальные изображения
     WATERMARKED_FOLDER = 'uploads/watermarked'  # Изображения с водяным знаком
-    ALLOWED_EXTENSIONS = {'JPEG', 'PNG', 'GIF', 'WEBP', 'BMP', 'TIFF'}
+    ALLOWED_EXTENSIONS = {'JPEG', 'PNG', 'GIF', 'WEBP', 'BMP', 'TIFF', 'JPG'}
     MAX_PROCESSING_TIME = 30  # Максимальное время обработки в секундах
     MAX_IMAGE_DIMENSION = 10000  # Максимальный размер изображения
 

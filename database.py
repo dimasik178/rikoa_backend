@@ -590,7 +590,7 @@ class DatabaseManager:
     
     def get_all_active_products(self):
         """Получает все активные (непроданные) товары"""
-        return Product.query.filter_by(is_sold=False).all()
+        return Product.query.filter_by(on_sale=True).all()
     
     def update_all_balance_histories(self):
         """Обновляет историю баланса для всех пользователей"""
