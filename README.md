@@ -208,7 +208,7 @@ sudo docker volume rm art-market-data
 
 ---
 
-## 📁 Структура проекта (v4.1.2)
+## 📁 Структура проекта (v4.1.3)
 
 ```
 ├── .dockerignore              # Файлы, игнорируемые Docker
@@ -219,11 +219,13 @@ sudo docker volume rm art-market-data
 ├── docker-compose.yml         # Конфигурация Docker-compose
 ├── docker-entrypoint.sh       # Проверка .env для запуска через Docker
 ├── README.md                  # Документация проекта
+├── GUIDE.md                   # Справка для пользователей       
 ├── docs.md                    # Детальная документация API
 ├── requirements.txt           # Зависимости Python
 ├── config.py                  # Конфигурация приложения (бонусы, комиссия)
 ├── daily_updater.py           # Ежедневное обновление (история баланса)
 ├── database.py                # Работа с базой данных
+├── hashes_manager.py          # Управление правами на изображения
 ├── jwt_manager.py             # Управление JWT токенами
 ├── main.py                    # Точка входа
 ├── models.py                  # Модели БД (Account, Product, Purchase)
