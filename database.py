@@ -9,10 +9,13 @@ import os
 import json
 import logging
 from decimal import Decimal, ROUND_CEILING
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
+def utc_now():
+    """Возвращает UTC datetime без информации о часовом поясе, как это делал utcnow()"""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 class TransactionManager:
     """Управление транзакциями и блокировками"""
@@ -66,7 +69,7 @@ class BankruptcyManager:
         if not can_declare:
             raise ValueError(message)
         
-        try:
+        def transaction():
             old_balance = account.balance
             
             # Устанавливаем новый баланс
@@ -74,14 +77,12 @@ class BankruptcyManager:
             
             # Увеличиваем счетчик банкротств
             account.bankruptcy_count += 1
-            
+
             # Обновляем дату последнего банкротства
-            account.last_bankruptcy = datetime.utcnow()
+            account.last_bankruptcy = utc_now()
             
             # Запрещаем повторное банкротство до следующего дня
             account.can_declare_bankruptcy = False
-            
-            db.session.commit()
             
             return {
                 'message': f'💸 Банкротство объявлено! Баланс изменён: {old_balance} → {account.balance} AC',
@@ -91,10 +92,8 @@ class BankruptcyManager:
                 'last_bankruptcy': account.last_bankruptcy.isoformat(),
                 'can_declare_bankruptcy': account.can_declare_bankruptcy
             }
-            
-        except Exception as e:
-            db.session.rollback()
-            raise ValueError(f"Ошибка при объявлении банкротства: {str(e)}")
+
+        return TransactionManager.execute_transaction(transaction)
     
     @staticmethod
     def reset_bankruptcy_cooldown_for_all():
@@ -192,7 +191,7 @@ class BonusManager:
             # Начисляем бонус
             account.balance += bonus
             account.total_earned += bonus
-            account.last_daily_bonus = datetime.utcnow()
+            account.last_daily_bonus = utc_now()
             
             # Запрещаем повторное получение бонуса до следующего дня
             account.can_claim_daily_bonus = False
@@ -358,19 +357,17 @@ class DatabaseManager:
         if len(description) > MarketConfig.MAX_DESCRIPTION_LENGTH:
             raise ValueError(f"Описание должно быть не более {MarketConfig.MAX_DESCRIPTION_LENGTH} символов")
         
-        product.title = title
-        product.price = price
-        product.description = description
-        product.creator_id = owner_id
-        product.on_sale = True
-        product.purchased_at = None
-        
-        db.session.commit()
-        
-        from hashes_manager import hashes_manager
-        hashes_manager.update_owner(original_hash, owner_id)
-        
-        return product
+        def transaction():
+            product.title = title
+            product.price = price
+            product.description = description
+            product.creator_id = owner_id
+            product.on_sale = True
+            product.purchased_at = None
+            hashes_manager.update_owner(original_hash, owner_id)
+            return product
+    
+        return TransactionManager.execute_transaction(transaction)
     
     def get_product(self, product_id: str) -> Product:
         """Получает товар по ID"""
@@ -432,7 +429,7 @@ class DatabaseManager:
             
             product.owner_id = buyer_id
             product.on_sale = False
-            product.purchased_at = datetime.utcnow()
+            product.purchased_at = utc_now()
             
             # Обновляем владельца в памяти
             hashes_manager.update_owner(product.original_hash, buyer_id)
@@ -459,39 +456,32 @@ class DatabaseManager:
         
         if product.owner_id != seller_id:
             raise ValueError("Только владелец может удалить товар")
-        
-        try:
+
+        def transaction():
             # Если товар в продаже - снимаем
             if product.on_sale:
                 product.on_sale = False
             
             # Отвязываем покупки от товара (устанавливаем product_id = None)
             Purchase.query.filter_by(product_id=product_id).update({'product_id': None})
-            
+
             # Удаляем из памяти (товар становится бесхозным)
             hashes_manager.remove_original(product.original_hash)
-            
+
             # Удаляем файлы
-            for ext in ['jpeg', 'jpg', 'png', 'gif', 'webp', 'bmp', 'tiff']:
+            for ext in map(lambda x: x.lower(), ServerConfig.ALLOWED_EXTENSIONS):
                 original_path = os.path.join(ServerConfig.ORIGINALS_FOLDER, f"{product.photo_url}.{ext}")
                 watermarked_path = os.path.join(ServerConfig.WATERMARKED_FOLDER, f"{product.photo_url}.{ext}")
                 if os.path.exists(original_path):
                     os.remove(original_path)
                 if os.path.exists(watermarked_path):
                     os.remove(watermarked_path)
-            
+                
             db.session.delete(product)
-            db.session.commit()
-            
-            return {
-                'message': 'Товар удален',
-                'product_id': product_id
-            }
-            
-        except Exception as e:
-            db.session.rollback()
-            raise ValueError(f'Ошибка удаления товара: {str(e)}')
-    
+            return {'message': 'Товар удален', 'product_id': product_id}
+        
+        return TransactionManager.execute_transaction(transaction)
+
     # ========== РАБОТА С ХЕШАМИ ==========
     
     def check_image_can_be_sold(self, file_hash: str, user_id: str) -> tuple[bool, str, str | None]:
