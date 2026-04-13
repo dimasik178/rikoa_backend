@@ -191,9 +191,10 @@ Authorization: Bearer <access_token>
             "purchased_at": "2026-04-04T17:15:06.239156"
         }
     ],
-    "balance_history": [300, 300, 300, 320, 350, 350, 350]
+    "balance_history": [300, 300, 300, 320, 350, 350, 350, ...]
 }
 ```
+*Примечание: Размер истрии баланса (balance_history) - 30 значений цены на протяжении 30 дней, без учёта сегодняшнего дня*
 
 ---
 
@@ -506,13 +507,14 @@ Authorization: Bearer <access_token>
 **Ответ (200):**
 ```json
 {
-    "balance_history": [300, 300, 300, 320, 350, 350, 350],
+    "balance_history": [300, 300, 300, 320, 350, 350, 350, ...],
     "total_spent": 150,
     "total_earned": 95,
     "current_balance": 245,
     "bankruptcy_count": 0
 }
 ```
+*Примечание: Размер истрии баланса (balance_history) - 30 значений цены на протяжении 30 дней, без учёта сегодняшнего дня*
 
 ---
 
