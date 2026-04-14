@@ -171,6 +171,8 @@ def create_app():
             
             if width > ServerConfig.MAX_IMAGE_DIMENSION or height > ServerConfig.MAX_IMAGE_DIMENSION:
                 return None, f"Размеры изображения слишком большие (максимум {ServerConfig.MAX_IMAGE_DIMENSION}x{ServerConfig.MAX_IMAGE_DIMENSION})"
+            if width < ServerConfig.MIN_IMAGE_DIMENSION or height < ServerConfig.MIN_IMAGE_DIMENSION:
+                return None, f"Размеры изображения слишком маленькие (минимум {ServerConfig.MIN_IMAGE_DIMENSION}x{ServerConfig.MIN_IMAGE_DIMENSION})"
             
             if image.format not in ['JPEG', 'PNG', 'GIF', 'WEBP', 'BMP', 'TIFF']:
                 return None, "Неподдерживаемый формат изображения"

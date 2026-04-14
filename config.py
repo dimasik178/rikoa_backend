@@ -85,6 +85,7 @@ class ServerConfig:
     ALLOWED_EXTENSIONS = {'JPEG', 'PNG', 'GIF', 'WEBP', 'BMP', 'TIFF', 'JPG'}
     MAX_PROCESSING_TIME = 30  # Максимальное время обработки в секундах
     MAX_IMAGE_DIMENSION = 10000  # Максимальный размер изображения
+    MIN_IMAGE_DIMENSION = 10  # Минимальный размер изображения
 
 # 📊 НАСТРОЙКИ API
 class ApiConfig:
