@@ -435,11 +435,12 @@ def create_app():
     @app.route('/api/products/<product_id>', methods=['GET'])
     def get_product_detail(product_id):
         # Получаем токен
-        token = None
-        auth_header = request.headers.get('Authorization')
-        if auth_header and auth_header.startswith('Bearer '):
-            token = auth_header.split(' ')[1]
-        
+        token = request.args.get('token')
+        if not token:  # Если в query нет, пробуем из заголовков
+            auth_header = request.headers.get('Authorization')
+            if auth_header and auth_header.startswith('Bearer '):
+                token = auth_header.split(' ')[1]
+
         product = db_manager.get_product(product_id)
         if not product:
             return jsonify({'error': 'Товар не найден'}), 404
