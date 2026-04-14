@@ -64,7 +64,7 @@ class MarketConfig:
 class WatermarkConfig:
     """Конфигурация водяных знаков"""
     WATERMARK_TEXT = "DEMO_ART_MARKET"           # Текст водяного знака
-    WATERMARK_OPACITY = 0.6                      # Прозрачность (0-1)
+    WATERMARK_OPACITY = 0.6                      # Непрозрачность (0-1) - чем больше значение, тем отчётливее видно вотермарку
     WATERMARK_FONT_SIZE_RATIO = 0.05             # Размер шрифта от ширины изображения
     WATERMARK_FONT_PATH = "fonts/Roboto-Regular.ttf"  # Путь к файлу шрифта (относительно корня проекта)
     WATERMARK_MIN_FONT_SIZE = 16                 # Минимальный размер шрифта в пикселях

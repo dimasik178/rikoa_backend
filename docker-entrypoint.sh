@@ -34,14 +34,18 @@ EOF
     echo "✅ Папка photo_examples создана"
 fi
 
-# === 3. Seed логика ===
-if [ ! -f ".seed_done" ]; then
-    echo "🌱 Заполняю базу данных..."
-    python seed.py
-    touch .seed_done
-    echo "✅ Seed завершён"
+# === 3. Seed логика (с проверкой переменной окружения) ===
+if [ "$RUN_SEED" = "true" ]; then
+    if [ ! -f ".seed_done" ]; then
+        echo "🌱 Заполняю базу данных..."
+        python seed.py
+        touch .seed_done
+        echo "✅ Seed завершён"
+    else
+        echo "⏭️  Seed уже выполнялся ранее, пропускаю"
+    fi
 else
-    echo "⏭️  Seed уже выполнялся ранее, пропускаю"
+    echo "⏭️  Seed пропущен (RUN_SEED != true)"
 fi
 
 echo ""
