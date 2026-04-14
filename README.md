@@ -172,7 +172,7 @@ sudo docker rm -f art-market
 # Заполнить тестовыми данными (20 пользователей, 100 товаров, 30% продаж)
 sudo docker exec art-market python seed.py
 
-# Принудительное обновление (история баланса + сброс банкротства)
+# Принудительное обновление (история баланса + сброс банкротства и сброс бонусов)
 sudo docker exec art-market python daily_updater.py --run-now
 ```
 
