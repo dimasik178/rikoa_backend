@@ -187,6 +187,10 @@ class Product(db.Model):
             'id': self.id,
             'title': self.title,
             'description': self.description,
+            'creator': {
+                'id': self.creator.id,
+                'nickname': self.creator.nickname
+            },
             'price': self.price,
             'photo_url': f"/api/images/original/{self.photo_url}",
             'created_at': self.created_at.isoformat(),
