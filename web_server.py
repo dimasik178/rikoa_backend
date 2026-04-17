@@ -653,10 +653,11 @@ def create_app():
     @app.route('/api/images/original/<file_id>')
     def serve_original_image(file_id):
         # Проверяем токен
-        token = None
-        auth_header = request.headers.get('Authorization')
-        if auth_header and auth_header.startswith('Bearer '):
-            token = auth_header.split(' ')[1]
+        token = request.args.get('token')
+        if not token:  # Если в query нет, пробуем из заголовков
+            auth_header = request.headers.get('Authorization')
+            if auth_header and auth_header.startswith('Bearer '):
+                token = auth_header.split(' ')[1]
         
         if not token:
             return jsonify({'error': 'Изображение не найдено'}), 404
