@@ -4,7 +4,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy import desc
 from werkzeug.security import generate_password_hash, check_password_hash
 from hashes_manager import hashes_manager
-from config import MarketConfig, ServerConfig, ApiConfig
+from config import MarketConfig, ServerConfig, ApiConfig, AccountNamesConfig
 import os
 import json
 import logging
@@ -234,6 +234,20 @@ class DatabaseManager:
     
     def create_account(self, nickname: str, mail: str, password: str) -> Account:
         """Создает новый аккаунт с бонусом за регистрацию"""
+        # Валидация длины
+        if len(nickname) < AccountNamesConfig.MIN_NICKNAME_LENGTH:
+            raise ValueError("Никнейм должен быть не менее 3 символов")
+        if len(nickname) > AccountNamesConfig.MAX_NICKNAME_LENGTH:
+            raise ValueError("Никнейм должен быть не более 80 символов")
+        
+        if len(mail) < AccountNamesConfig.MIN_EMAIL_LENGTH:
+            raise ValueError("Email должен быть не менее 5 символов")
+        if len(mail) > AccountNamesConfig.MAX_EMAIL_LENGTH:
+            raise ValueError("Email должен быть не более 120 символов")
+        
+        if len(password) < AccountNamesConfig.MIN_PASSWORD_LENGTH:
+            raise ValueError("Пароль должен быть не менее 6 символов")        
+
         password_hash = generate_password_hash(password)
         
         # Начальный баланс = стартовый + бонус

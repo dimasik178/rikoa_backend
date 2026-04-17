@@ -29,6 +29,14 @@ class JWTConfig:
     REFRESH_TOKEN_EXPIRES = os.getenv("JWT_REFRESH_TOKEN_EXPIRES") # 30 дней в секундах
     TOKEN_LOCATION = 'headers'  # 'cookies'
 
+class AccountNamesConfig:
+    """Конфигурация полей аккаунта"""
+    MIN_NICKNAME_LENGTH = 3
+    MAX_NICKNAME_LENGTH = 80
+    MIN_EMAIL_LENGTH = 5
+    MAX_EMAIL_LENGTH = 120
+    MIN_PASSWORD_LENGTH = 6
+
 # 💰 ЭКОНОМИЧЕСКАЯ СИСТЕМА
 class MarketConfig:
     """Конфигурация рыночных правил"""
