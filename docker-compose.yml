@@ -36,21 +36,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
-  client:
-    build: ./client
-    ports:
-      - '80:80'
-      - '443:443'
-    environment:
-      - VITE_WS_URL=https://rikoa.tech/
-    depends_on:
-      - backend
-    restart: unless-stopped
-    volumes:
-      - /etc/letsencrypt/live/rikoa.tech/fullchain.pem:/etc/letsencrypt/live/rikoa.tech/fullchain.pem
-      - /etc/letsencrypt/live/rikoa.tech/privkey.pem:/etc/letsencrypt/live/rikoa.tech/privkey.pem
-    networks:
-      - app-network
 
 # Определяем тома для постоянных данных
 volumes:
