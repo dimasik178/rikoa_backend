@@ -30,6 +30,7 @@
 ### 1. Клонируйте и соберите
 ```bash
 git clone https://github.com/dimasik178/rikoa_backend.git
+python3 -c "import secrets,re; c=open('rikoa_backend/.env.example').read(); c=re.sub(r'SECRET_KEY=.*',f'SECRET_KEY={secrets.token_urlsafe(32)}',c); c=re.sub(r'JWT_SECRET_KEY=.*',f'JWT_SECRET_KEY={secrets.token_urlsafe(32)}',c); open('rikoa_backend/.env.example','w').write(c); print('✅ JWT ключи установлены')"
 cd rikoa_backend
 sudo docker build -t art-market .
 ```
